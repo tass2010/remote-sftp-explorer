@@ -1,0 +1,38 @@
+{
+  "name": "remote-sftp-explorer-workspace",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "workspaces": [
+    "src/packages/*"
+  ],
+  "scripts": {
+    "typecheck": "npm run typecheck:protocol && npm run typecheck:core && npm run typecheck:extension && npm run typecheck:webview && npm run typecheck:test",
+    "typecheck:protocol": "tsc -p src/packages/sftp-protocol",
+    "typecheck:core": "tsc -p src/packages/core",
+    "typecheck:extension": "tsc -p src/packages/extension",
+    "typecheck:webview": "tsc -p src/packages/extension/webview",
+    "typecheck:test": "tsc -p tsconfig.test.json",
+    "lint": "eslint .",
+    "test": "node --test --experimental-strip-types \"src/packages/*/test/**/*.test.ts\"",
+    "test:protocol": "node --test --experimental-strip-types \"src/packages/sftp-protocol/test/**/*.test.ts\"",
+    "test:core": "node --test --experimental-strip-types \"src/packages/core/test/**/*.test.ts\"",
+    "test:extension": "node --test --experimental-strip-types \"src/packages/extension/test/**/*.test.ts\"",
+    "build": "node esbuild.mjs",
+    "package:vsix": "npm run build && npm run build:askpass && node scripts/checkPackagePrerequisites.mjs && node scripts/packageVsix.mjs",
+    "build:askpass": "node scripts/buildAskpass.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/vscode": "^1.100.0",
+    "@vscode/vsce": "^3.9.2",
+    "esbuild": "^0.25.0",
+    "eslint": "^9.39.5",
+    "typescript": "^5.9.0",
+    "typescript-eslint": "^8.68.0"
+  }
+}

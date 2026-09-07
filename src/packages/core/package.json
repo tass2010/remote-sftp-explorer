@@ -1,0 +1,14 @@
+{
+  "name": "@remote-sftp-explorer/core",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "Product logic: OpenSSH transport, host discovery, sessions, locking, safe replace. Never imports vscode.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@remote-sftp-explorer/sftp-protocol": "0.3.0"
+  }
+}

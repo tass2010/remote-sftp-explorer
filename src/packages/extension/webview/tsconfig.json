@@ -1,0 +1,10 @@
+{
+  "extends": "../../../../tsconfig.base.json",
+  "compilerOptions": {
+    // Browser context: DOM only. No node, no vscode -- the webview client runs in a
+    // sandboxed iframe and may only touch the DOM and the postMessage bridge.
+    "types": [],
+    "lib": ["ES2022", "DOM", "DOM.Iterable"]
+  },
+  "include": ["src/**/*.ts"]
+}

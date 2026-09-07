@@ -1,0 +1,155 @@
+{
+  "name": "remote-sftp-explorer",
+  "displayName": "Remote SFTP Explorer",
+  "description": "Browse and safely edit remote files through your existing Windows OpenSSH configuration.",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "files": [
+    "dist/**",
+    "media/**",
+    "bin/**",
+    "resources/**",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "vscode": "^1.100.0"
+  },
+  "main": "./dist/extension.cjs",
+  "extensionKind": [
+    "ui"
+  ],
+  "dependencies": {
+    "@remote-sftp-explorer/core": "0.3.0",
+    "@remote-sftp-explorer/sftp-protocol": "0.3.0"
+  },
+  "activationEvents": [
+    "onView:remoteSftp.hosts",
+    "onView:remoteSftp.favorites",
+    "onView:remoteSftp.files",
+    "onFileSystem:remote-sftp"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "remoteSftp.refreshHosts",
+        "title": "Refresh Hosts",
+        "category": "Remote SFTP",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "remoteSftp.connect",
+        "title": "Connect",
+        "category": "Remote SFTP"
+      },
+      {
+        "command": "remoteSftp.disconnect",
+        "title": "Disconnect",
+        "category": "Remote SFTP",
+        "icon": "$(debug-disconnect)"
+      },
+      {
+        "command": "remoteSftp.refreshFiles",
+        "title": "Refresh",
+        "category": "Remote SFTP",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "remoteSftp.addFavorite",
+        "title": "Add to Favorites",
+        "category": "Remote SFTP"
+      },
+      {
+        "command": "remoteSftp.removeFavorite",
+        "title": "Remove Favorite",
+        "icon": "$(trash)",
+        "category": "Remote SFTP"
+      },
+      {
+        "command": "remoteSftp.openFavorite",
+        "title": "Open Favorite",
+        "category": "Remote SFTP"
+      },
+      {
+        "command": "remoteSftp.clearHistory",
+        "title": "Clear Directory History",
+        "category": "Remote SFTP"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "remoteSftp",
+          "title": "Remote SFTP Explorer",
+          "icon": "resources/remote-sftp.svg"
+        }
+      ]
+    },
+    "views": {
+      "remoteSftp": [
+        {
+          "id": "remoteSftp.hosts",
+          "name": "SSH Hosts"
+        },
+        {
+          "id": "remoteSftp.favorites",
+          "name": "Favorites"
+        },
+        {
+          "id": "remoteSftp.files",
+          "name": "Files",
+          "type": "webview"
+        }
+      ]
+    },
+    "menus": {
+      "view/item/context": [
+        {
+          "command": "remoteSftp.connect",
+          "when": "view == remoteSftp.hosts && viewItem == remoteSftp.host",
+          "group": "1_connection@1"
+        },
+        {
+          "command": "remoteSftp.openFavorite",
+          "when": "view == remoteSftp.favorites && viewItem == remoteSftp.favorite",
+          "group": "1_favorites@1"
+        },
+        {
+          "command": "remoteSftp.removeFavorite",
+          "when": "view == remoteSftp.favorites && viewItem == remoteSftp.favorite",
+          "group": "inline@1"
+        },
+        {
+          "command": "remoteSftp.removeFavorite",
+          "when": "view == remoteSftp.favorites && viewItem == remoteSftp.favorite",
+          "group": "2_favorites@1"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "remoteSftp.refreshHosts",
+          "when": "view == remoteSftp.hosts",
+          "group": "navigation@1"
+        },
+        {
+          "command": "remoteSftp.refreshFiles",
+          "when": "view == remoteSftp.files && remoteSftp.connected",
+          "group": "navigation@1"
+        },
+        {
+          "command": "remoteSftp.disconnect",
+          "when": "view == remoteSftp.files && remoteSftp.connected",
+          "group": "navigation@2"
+        },
+        {
+          "command": "remoteSftp.clearHistory",
+          "when": "view == remoteSftp.files",
+          "group": "2_history@1"
+        }
+      ]
+    }
+  }
+}

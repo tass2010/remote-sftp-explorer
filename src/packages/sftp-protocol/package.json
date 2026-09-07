@@ -1,0 +1,12 @@
+{
+  "name": "@remote-sftp-explorer/sftp-protocol",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "SFTP v3 wire format and pipelined client engine. No I/O, no VS Code.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {}
+}

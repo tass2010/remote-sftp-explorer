@@ -1,0 +1,11 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    // types:[] is a real boundary: with no @types/node in scope, the ambient globals
+    // `Buffer`, `process`, `require`, `__dirname` do not resolve, so this package
+    // cannot reach for I/O even by accident. Proven by test/architecture.test.ts.
+    "types": [],
+    "lib": ["ES2023"]
+  },
+  "include": ["src/**/*.ts", "src/**/*.d.ts"]
+}

@@ -1,0 +1,24 @@
+[package]
+name = "remote-sftp-askpass"
+version = "0.3.0"
+edition = "2021"
+license = "MIT"
+description = "SSH_ASKPASS helper that relays OpenSSH prompts to Remote SFTP Explorer over loopback."
+publish = false
+
+[[bin]]
+name = "remote-sftp-askpass"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+zeroize = "1"
+
+[profile.release]
+# The binary handles plaintext credentials; a smaller, panic-free build has less to leak and
+# nothing useful to unwind through.
+panic = "abort"
+strip = true
+opt-level = "z"
+lto = true

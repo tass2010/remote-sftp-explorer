@@ -1,0 +1,9 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    // The only project permitted to see the `vscode` API surface.
+    "types": ["node", "vscode"],
+    "lib": ["ES2023"]
+  },
+  "include": ["src/**/*.ts"]
+}

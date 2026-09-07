@@ -1,0 +1,12 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    // NOTE: omitting "vscode" here does NOT block `import * as vscode from 'vscode'` --
+    // the `types` option only governs automatically included global type packages, while
+    // an explicit import still resolves through node_modules/@types/vscode. The no-vscode
+    // rule for this package is enforced by test/architecture.test.ts and by eslint.
+    "types": ["node"],
+    "lib": ["ES2023"]
+  },
+  "include": ["src/**/*.ts"]
+}

@@ -1,0 +1,11 @@
+{
+  "//": "Tests run under `node --test --experimental-strip-types`, so they may use node APIs",
+  "//2": "regardless of which package they cover. Production boundaries stay enforced by the",
+  "//3": "per-package tsconfigs; this project only typechecks test sources.",
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node", "vscode"],
+    "lib": ["ES2023", "DOM"]
+  },
+  "include": ["src/packages/*/test/**/*.ts"]
+}

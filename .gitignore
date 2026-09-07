@@ -1,0 +1,13 @@
+node_modules/
+dist/
+media/
+coverage/
+target/
+*.vsix
+*.log
+*.tsbuildinfo
+.vscode-test/
+src/packages/extension/bin/
+src/native/askpass/target/
+.claude/
+docs/
