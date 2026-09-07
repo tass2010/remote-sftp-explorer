@@ -29,7 +29,6 @@ execFileSync(
     '--target',
     'win32-x64',
     '--no-dependencies',
-    '--allow-missing-repository',
     '--out',
     outFile
   ],
