@@ -23,9 +23,9 @@ already trust and speaks the SFTP protocol over its stdio:
 VS Code  ──►  ssh.exe -s <host> sftp  ──►  your server
 ```
 
-That single decision is why your existing configuration keeps working, and it is the reason
-for most of the design. The trade-offs are recorded in
-[ADR-0004](docs/adr/0004-keep-ssh-subprocess.md).
+That single decision is why your existing configuration keeps working, and it shapes most of
+the rest of the design. The cost is that the SFTP protocol has to be implemented here, and
+that interactive authentication prompts have to be bridged out of a process with no terminal.
 
 ## Requirements
 
@@ -111,45 +111,41 @@ npm run typecheck && npm run lint && npm test
 npm run package:vsix
 ```
 
-[docs/06-building.md](docs/06-building.md) covers the prerequisites, every script, and why
-packaging refuses rather than warns when the helper is missing.
-
-## Documentation
-
-The documentation is short and split by question rather than being one large document, because
-a 150-line protocol document gets re-read by whoever changes the protocol and an 800-line
-omnibus gets re-read by nobody.
-
-| Document | Answers |
+| Script | Does |
 |---|---|
-| [01-product.md](docs/01-product.md) | What is this, who is it for, and what does it deliberately not do? |
-| [02-architecture.md](docs/02-architecture.md) | How is the code divided, and what may depend on what? |
-| [03-protocol.md](docs/03-protocol.md) | How do we speak SFTP v3 over an `ssh.exe` subprocess? |
-| [04-auth-and-security.md](docs/04-auth-and-security.md) | How do auth prompts reach the user, and what are the security limits? |
-| [05-testing.md](docs/05-testing.md) | What is tested where, and what genuinely needs Windows? |
-| [06-building.md](docs/06-building.md) | How do I build, test, and package this? |
-| [adr/](docs/adr/) | Dated records of decisions, including the ones that were reversed. |
+| `npm run typecheck` | Typechecks all four projects, each under its own boundary |
+| `npm run lint` | ESLint, including the import-boundary rules |
+| `npm test` | The whole suite |
+| `npm run build` | Bundles the extension host and the webview client |
+| `npm run build:askpass` | Builds the Rust helper and stages it for packaging |
+| `npm run package:vsix` | Everything packaging needs, then produces the VSIX |
 
-Architectural claims in those documents carry an `enforced-by:` tag naming the test that proves
-them, and a test asserts that every such tag points at a file that exists. This is deliberate:
-the previous generation of this project asserted an architecture in prose that nothing checked,
-and the code drifted away from it for months without anyone noticing.
+Packaging **fails** rather than warning if the authentication helper is missing, and tells you
+how to build it. That is deliberate: an earlier release shipped without the helper because the
+manifest omitted its directory, and the result was an extension that silently could not do
+password authentication at all.
 
 ## Security
 
 Credentials are never written to disk or to a log. The `SSH_ASKPASS` helper zeroes its copies
-of the token and the answer; the TypeScript side minimises copies but cannot zero a JavaScript
-string, and [04-auth-and-security.md](docs/04-auth-and-security.md) says so plainly rather than
-implying parity.
+of the token and the answer. The TypeScript side minimises copies but **cannot** zero a
+JavaScript string — strings are immutable and garbage-collected, so an answer may persist in
+memory until collected. Saying so plainly seems better than implying parity.
+
+The prompt bridge listens on `127.0.0.1` only, mints a fresh 256-bit token for every connection
+attempt, compares it in constant time, and shuts down as soon as the attempt ends.
 
 If you find a vulnerability, please report it privately rather than opening a public issue.
 
 ## Contributing
 
 Issues and pull requests are welcome. Before opening a PR, please make sure
-`npm run typecheck`, `npm run lint` and `npm test` all pass — the test suite includes
-architecture and documentation invariants, so a boundary violation or a stale doc reference
-will fail the build rather than being caught in review.
+`npm run typecheck`, `npm run lint` and `npm test` all pass.
+
+The suite includes architecture invariants as executable tests
+(`src/packages/core/test/architecture.test.ts`), so a package-boundary violation fails the
+build rather than having to be caught in review. The same goes for the extension manifest: a
+contributed command with no handler, or a handler with no contribution, is a test failure.
 
 ## License
 
