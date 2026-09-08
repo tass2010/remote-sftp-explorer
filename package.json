@@ -24,7 +24,8 @@
     "test:extension": "node --test --experimental-strip-types \"src/packages/extension/test/**/*.test.ts\"",
     "build": "node esbuild.mjs",
     "package:vsix": "npm run build && npm run build:askpass && node scripts/checkPackagePrerequisites.mjs && node scripts/packageVsix.mjs",
-    "build:askpass": "node scripts/buildAskpass.mjs"
+    "build:askpass": "node scripts/buildAskpass.mjs",
+    "set-version": "node scripts/setVersion.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
