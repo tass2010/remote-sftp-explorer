@@ -15,7 +15,11 @@ const extensionRoot = path.resolve(fileURLToPath(import.meta.url), '../..');
 const srcRoot = path.join(extensionRoot, 'src');
 
 interface Manifest {
+  capabilities?: {
+    untrustedWorkspaces?: { supported?: boolean | string };
+  };
   contributes: {
+    configuration?: unknown;
     commands: Array<{ command: string; title: string }>;
     views: Record<string, Array<{ id: string; name: string; type?: string }>>;
     menus: Record<string, Array<{ command: string; when?: string }>>;
@@ -131,4 +135,51 @@ test('the manifest ships the askpass binary directory', () => {
     files.includes('bin/**'),
     'package.json "files" must include bin/** or the askpass helper is omitted from the VSIX'
   );
+});
+
+// ---------------------------------------------------------------------------
+// Workspace Trust
+// ---------------------------------------------------------------------------
+
+test('the extension declares whether it runs in an untrusted workspace', () => {
+  // Without this, VS Code disables the extension in Restricted Mode and the whole activity
+  // bar icon disappears, with only a line in the Extensions view to explain why.
+  const supported = manifest.capabilities?.untrustedWorkspaces?.supported;
+  assert.notEqual(
+    supported,
+    undefined,
+    'capabilities.untrustedWorkspaces is undeclared, so the extension silently disables itself ' +
+      'whenever the open folder is not trusted'
+  );
+});
+
+test('claiming untrusted-workspace support stays honest', () => {
+  // The claim rests on one thing: nothing this extension reads can be influenced by the
+  // folder that happens to be open. Every input comes from the user's home directory or the
+  // system. These checks fail if that stops being true, because at that point the claim would
+  // be an invitation rather than a statement of fact.
+  if (manifest.capabilities?.untrustedWorkspaces?.supported !== true) return;
+
+  assert.equal(
+    manifest.contributes.configuration,
+    undefined,
+    'A settings contribution can be overridden by workspace settings, and a workspace is ' +
+      'exactly what an untrusted workspace is. Adding one -- an ssh executable path, say -- ' +
+      'means switching to "limited" and listing it under restrictedConfigurations.'
+  );
+
+  const source = allSourceText();
+  for (const api of [
+    'getConfiguration',
+    'workspaceFolders',
+    'workspace.fs',
+    'workspace.findFiles',
+    'asRelativePath'
+  ]) {
+    assert.ok(
+      !source.includes(api),
+      `src/ uses ${api}, so the workspace can now influence this extension. Re-examine the ` +
+        'untrustedWorkspaces claim before keeping it.'
+    );
+  }
 });

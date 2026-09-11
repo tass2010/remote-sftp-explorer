@@ -1,6 +1,6 @@
 {
   "name": "@remote-sftp-explorer/core",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "type": "module",
   "license": "MIT",
@@ -9,6 +9,6 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@remote-sftp-explorer/sftp-protocol": "0.3.0"
+    "@remote-sftp-explorer/sftp-protocol": "0.3.1"
   }
 }
