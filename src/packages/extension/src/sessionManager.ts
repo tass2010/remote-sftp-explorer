@@ -11,6 +11,9 @@ import {
   type PromptUi
 } from '@remote-sftp-explorer/core';
 
+/** How long housekeeping waits so it does not compete with the first directory listing. */
+const SWEEP_DELAY_MS = 5_000;
+
 export interface SessionManagerOptions {
   spawner: ProcessSpawner;
   prompts: PromptUi;
@@ -170,7 +173,14 @@ export class SessionManager implements vscode.Disposable {
       session.onDidClose((error) => this.#handleUnexpectedClose(alias, error));
 
       // Clear leftovers from a save that an earlier disconnect interrupted.
-      void session.sweep(session.rootPath).catch(() => undefined);
+      //
+      // Deferred, because this lists the root directory -- exactly what the browser is about
+      // to do -- and racing the user's first listing for the same connection made opening the
+      // panel feel slow for work nobody asked for. It is housekeeping; it can wait.
+      const sweepTimer = setTimeout(() => {
+        void session.sweep(session.rootPath).catch(() => undefined);
+      }, SWEEP_DELAY_MS);
+      sweepTimer.unref?.();
       return session;
     } catch (error) {
       this.#options.state.set('failed', alias, describe(error));

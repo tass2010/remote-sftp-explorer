@@ -6,7 +6,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Extension } from '@remote-sftp-explorer/sftp-protocol';
+import { Extension, PacketType } from '@remote-sftp-explorer/sftp-protocol';
 import {
   createControllableClock,
   FakeSftpServer
@@ -223,3 +223,61 @@ test('a server without posix-rename still saves, via the backup fallback', async
   assert.equal(result.strategy, 'backup-fallback');
   assert.equal(fs.read('/home/dev/notes.txt'), 'new');
 });
+
+// ---------------------------------------------------------------------------
+// Round trips
+// ---------------------------------------------------------------------------
+
+const statCount = (server: FakeSftpServer): number =>
+  server.received.filter((request) => request.type === PacketType.Stat).length;
+
+test('a caller that already has the stat does not pay for it again', async () => {
+  // Opening a file used to stat it twice before reading a byte: once for the size and type
+  // check, then again here for the baseline. On a link with latency that is a whole round
+  // trip spent re-asking a question just answered.
+  const { session, fs, server } = await connect();
+  fs.write('/home/dev/notes.txt', 'hello world', 0o100644);
+
+  const known = await session.baseline('/home/dev/notes.txt');
+  const before = statCount(server);
+
+  const { content } = await session.readFile('/home/dev/notes.txt', { known });
+
+  assert.equal(decode(content), 'hello world');
+  assert.equal(
+    statCount(server) - before,
+    1,
+    'only the closing consistency check should stat; the opening one was handed in'
+  );
+});
+
+test('without a known baseline the read still stats on both sides', async () => {
+  // The consistency check is the point of the pair, so the saving must come from not asking
+  // twice -- never from dropping the check.
+  const { session, fs, server } = await connect();
+  fs.write('/home/dev/notes.txt', 'hello world', 0o100644);
+
+  const before = statCount(server);
+  await session.readFile('/home/dev/notes.txt');
+
+  assert.equal(statCount(server) - before, 2, 'one before the read, one after');
+});
+
+test('reading does not wait for the handle to be closed', async () => {
+  // The bytes are assembled before CLOSE is sent; making the editor wait for its reply buys
+  // nothing but latency.
+  const { session, fs, server } = await connect();
+  fs.write('/home/dev/notes.txt', 'content', 0o100644);
+
+  await session.readFile('/home/dev/notes.txt');
+  const closesAtReturn = server.received.filter((r) => r.type === PacketType.Close).length;
+
+  await settle();
+  const closesAfter = server.received.filter((r) => r.type === PacketType.Close).length;
+  assert.ok(closesAfter >= closesAtReturn, 'the handle is still released, just not awaited');
+  assert.ok(closesAfter >= 1, 'the handle must eventually be closed');
+});
+
+async function settle(times = 8): Promise<void> {
+  for (let index = 0; index < times; index += 1) await Promise.resolve();
+}

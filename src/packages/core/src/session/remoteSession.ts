@@ -120,14 +120,29 @@ export class RemoteSession {
 
   async readFile(
     target: string,
-    options: { signal?: AbortSignal; onProgress?: (bytes: number) => void } = {}
+    options: {
+      signal?: AbortSignal;
+      onProgress?: (bytes: number) => void;
+      /**
+       * A baseline the caller has already fetched.
+       *
+       * Opening a file used to stat it twice before reading a single byte: once by the caller
+       * to check its type and size, then again here for the baseline. On a link with any
+       * latency that is a whole round trip spent re-asking a question just answered. Only the
+       * first attempt can use it -- a retry has to look again.
+       */
+      known?: RemoteBaseline | undefined;
+    } = {}
   ): Promise<{ content: Uint8Array; baseline: RemoteBaseline }> {
     const path = normalizeRemotePath(target);
     // Stat before and after: if the file changed underneath the read, the bytes we assembled
     // may be a mix of two versions, and silently handing that to an editor would be worse
     // than making the user try again.
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      const before = await this.baseline(path, options.signal);
+      const before =
+        attempt === 0 && options.known !== undefined
+          ? options.known
+          : await this.baseline(path, options.signal);
       const content = await this.#client.readFile(path, {
         size: before.size,
         signal: options.signal,

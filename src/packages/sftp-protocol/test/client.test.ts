@@ -359,6 +359,9 @@ test('a directory listing failure closes the directory handle', async () => {
 
   const { client } = await connect(server);
   await assert.rejects(() => client.readDirectory('/dir'), /PERMISSION_DENIED/);
+  // CLOSE is deliberately not awaited -- the caller should not wait a round trip for a reply
+  // nobody reads -- so let it land before asserting rather than depending on scheduling luck.
+  await settle();
   assert.equal(closes, 1, 'the handle must be released even on failure');
 });
 

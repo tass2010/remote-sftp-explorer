@@ -88,7 +88,10 @@ export class RemoteFileSystemProvider implements vscode.FileSystemProvider, vsco
         if (choice !== 'Open anyway') throw new vscode.CancellationError();
       }
 
-      const { content, baseline } = await session.readFile(path);
+      // The stat above already answered this; passing it down saves a round trip per open.
+      const { content, baseline } = await session.readFile(path, {
+        known: { size: stat.size, mtime: stat.mtime }
+      });
       this.#documents.set(uri.toString(), { content, baseline });
       return content;
     });

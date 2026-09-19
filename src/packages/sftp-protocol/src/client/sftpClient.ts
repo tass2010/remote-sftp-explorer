@@ -340,7 +340,10 @@ export class SftpClient {
         }
       }
     } finally {
-      await this.#closeHandleQuietly(handle);
+      // Not awaited: the entries are already in hand, and CLOSE is a full round trip whose
+      // answer nobody reads. Waiting for it just adds latency to every directory the user
+      // opens. Failures are swallowed either way, and channel death force-closes everything.
+      void this.#closeHandleQuietly(handle);
     }
     return all;
   }
@@ -476,7 +479,9 @@ export class SftpClient {
       this.#throwIfAborted(options.signal);
       return buffer;
     } finally {
-      await this.#closeHandleQuietly(handle);
+      // Same reasoning as readDirectory: the bytes are assembled, so making the editor wait
+      // for CLOSE before showing them buys nothing.
+      void this.#closeHandleQuietly(handle);
     }
   }
 
