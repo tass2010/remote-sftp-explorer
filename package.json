@@ -27,7 +27,7 @@
     "build:askpass": "node scripts/buildAskpass.mjs",
     "set-version": "node scripts/setVersion.mjs",
     "build:integration": "node esbuild.integration.mjs",
-    "test:integration": "npm run build && npm run build:integration && xvfb-run -a node src/packages/extension/dist/test/runTests.mjs"
+    "test:integration": "npm run build && npm run build:integration && xvfb-run -a node dist/integration/runTests.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

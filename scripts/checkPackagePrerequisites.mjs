@@ -34,6 +34,25 @@ const required = [
   }
 ];
 
+/**
+ * Directories that must NOT be inside the packaged tree.
+ *
+ * `files` ships `dist/**`, so anything written there reaches users. The Extension Host test
+ * bundles landed there once, which would have put a fake SSH server and a test runner into
+ * the released VSIX.
+ */
+const forbidden = ['dist/test'];
+const shipped = forbidden.filter((entry) => existsSync(path.join(extensionRoot, entry)));
+if (shipped.length > 0) {
+  console.error('Cannot package: build output that must not ship is present.\n');
+  for (const entry of shipped) {
+    console.error(`  ${entry}`);
+    console.error('      fix: delete it. Test bundles belong in dist/integration/ at the');
+    console.error('           repository root, outside what the manifest ships.\n');
+  }
+  process.exit(1);
+}
+
 const missing = required.filter((entry) => !existsSync(path.join(extensionRoot, entry.file)));
 
 if (missing.length > 0) {

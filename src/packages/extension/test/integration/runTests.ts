@@ -9,10 +9,12 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { runTests } from '@vscode/test-electron';
 
+// This file runs from dist/integration/, two levels below the repository root.
 const here = resolve(import.meta.dirname);
-const extensionDevelopmentPath = resolve(here, '../../..');
-const extensionTestsPath = resolve(here, 'suite.cjs');
-const fakeSsh = resolve(here, 'fakeSsh.cjs');
+const repositoryRoot = resolve(here, '../..');
+const extensionDevelopmentPath = join(repositoryRoot, 'src', 'packages', 'extension');
+const extensionTestsPath = join(here, 'suite.cjs');
+const fakeSsh = join(here, 'fakeSsh.cjs');
 
 const workspace = mkdtempSync(join(tmpdir(), 'remote-sftp-host-'));
 const remoteRoot = join(workspace, 'remote');

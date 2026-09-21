@@ -13,7 +13,10 @@ import { chmodSync } from 'node:fs';
  * Bundled rather than type-stripped because Electron loads the suite through its own module
  * machinery, and a single file with no loader flags is one fewer thing to be surprised by.
  */
-const outdir = 'src/packages/extension/dist/test';
+// Deliberately NOT under the extension package. Its manifest ships `dist/**`, so a bundle
+// placed there rides along into the VSIX -- which briefly shipped a fake SSH server to users
+// before anyone noticed.
+const outdir = 'dist/integration';
 
 await Promise.all([
   build({
