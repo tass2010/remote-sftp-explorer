@@ -188,11 +188,28 @@ export class RemoteFileSystemProvider implements vscode.FileSystemProvider, vsco
   async rename(
     oldUri: vscode.Uri,
     newUri: vscode.Uri,
-    _options: { readonly overwrite: boolean }
+    options: { readonly overwrite: boolean }
   ): Promise<void> {
     return this.#guard(oldUri, async () => {
       const session = await this.#sessions.require();
-      await session.rename(remotePathOf(oldUri), remotePathOf(newUri));
+      const destination = remotePathOf(newUri);
+
+      if (!options.overwrite) {
+        // `posix-rename@openssh.com` is atomic and silently replaces the destination, so
+        // without this the extension would offer to refuse an overwrite and then perform one.
+        // The gap between the check and the rename cannot be closed from here; a check with a
+        // gap still beats no check, and on servers without the extension plain v3 RENAME
+        // refuses on its own.
+        let occupied = true;
+        try {
+          await session.stat(destination);
+        } catch {
+          occupied = false;
+        }
+        if (occupied) throw vscode.FileSystemError.FileExists(newUri);
+      }
+
+      await session.rename(remotePathOf(oldUri), destination);
       this.#documents.delete(oldUri.toString());
       this.#emitter.fire([
         { type: vscode.FileChangeType.Deleted, uri: oldUri },

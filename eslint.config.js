@@ -36,7 +36,10 @@ export default tseslint.config(
       '**/dist/**',
       '**/media/**',
       '**/target/**',
-      '**/bin/**'
+      '**/bin/**',
+      // A downloaded copy of VS Code lives here. Linting 300 MB of someone else's bundled
+      // JavaScript exhausts the heap rather than merely wasting time.
+      '.vscode-test/**'
     ]
   },
 

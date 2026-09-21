@@ -4,8 +4,16 @@
   "//3": "per-package tsconfigs; this project only typechecks test sources.",
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "types": ["node", "vscode"],
-    "lib": ["ES2023", "DOM"]
+    "types": [
+      "node",
+      "vscode"
+    ],
+    "lib": [
+      "ES2023",
+      "DOM"
+    ]
   },
-  "include": ["src/packages/*/test/**/*.ts"]
+  "include": [
+    "src/packages/*/test/**/*.ts"
+  ]
 }

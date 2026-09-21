@@ -29,15 +29,33 @@ export class PathLockRegistry {
 
   /** Run `operation` while holding the write lock for `path` and its parent. */
   async withWriteLock<T>(path: string, operation: () => Promise<T>): Promise<T> {
-    const normalized = normalizeRemotePath(path);
-    const parent = parentRemotePath(normalized);
-    // Sorted acquisition order: two operations wanting the same pair always take them in the
-    // same sequence, so they can never each hold one and wait for the other.
-    const keys = [...new Set([normalized, parent])].sort();
+    return this.withWriteLocks([path], operation);
+  }
+
+  /**
+   * Run `operation` holding the write locks for several paths at once.
+   *
+   * Every path an operation touches must be claimed in ONE acquisition. Nesting two
+   * `withWriteLock` calls deadlocks the operation against itself whenever the paths share a
+   * parent -- which for a rename inside a directory is always -- because the inner call waits
+   * for a key the outer call is still holding and nothing will ever release it. Sorting makes
+   * concurrent operations safe against each other; only combining makes one operation safe
+   * against itself.
+   */
+  async withWriteLocks<T>(paths: readonly string[], operation: () => Promise<T>): Promise<T> {
+    const keys = new Set<string>();
+    for (const path of paths) {
+      const normalized = normalizeRemotePath(path);
+      keys.add(normalized);
+      keys.add(parentRemotePath(normalized));
+    }
+    // Sorted acquisition order: two operations wanting overlapping keys always take them in
+    // the same sequence, so they can never each hold one and wait for the other.
+    const ordered = [...keys].sort();
 
     const acquired: string[] = [];
     try {
-      for (const key of keys) {
+      for (const key of ordered) {
         await this.#acquire(key);
         acquired.push(key);
       }

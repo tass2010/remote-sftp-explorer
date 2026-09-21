@@ -425,3 +425,20 @@ test('a stalled upload reports the stall and stops', async () => {
   assert.equal(source.closed, true, 'the local handle is released even on a stall');
   assert.equal(fs.read('/home/dev/notes.txt'), 'original', 'and the original is untouched');
 });
+
+test('renaming within a directory completes instead of deadlocking on its own lock', async () => {
+  // rename takes the source lock and then, nested inside it, the destination lock. Both cover
+  // the same parent directory, so the inner acquisition waits for a key the outer one is
+  // still holding and nothing will ever release it. Sorted acquisition prevents deadlock
+  // BETWEEN concurrent operations; it says nothing about one operation nesting two.
+  const { session, fs } = await connect();
+  fs.write('/home/dev/old.txt', 'contents', 0o100644);
+
+  const outcome = await Promise.race([
+    session.rename('/home/dev/old.txt', '/home/dev/new.txt').then(() => 'renamed'),
+    new Promise((resolve) => setTimeout(() => resolve('DEADLOCKED'), 500))
+  ]);
+
+  assert.equal(outcome, 'renamed');
+  assert.equal(fs.read('/home/dev/new.txt'), 'contents');
+});

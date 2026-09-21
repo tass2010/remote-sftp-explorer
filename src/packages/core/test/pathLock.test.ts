@@ -162,3 +162,50 @@ test('nested paths lock their own parent, not the whole tree', async () => {
   gate.resolve();
   await Promise.all([deep, sibling]);
 });
+
+test('one operation may hold two paths in the same directory without deadlocking itself', async () => {
+  // Nesting two withWriteLock calls deadlocks whenever the paths share a parent: the inner
+  // acquisition waits for a key the outer one still holds, and nothing will ever release it.
+  // Sorted order makes concurrent operations safe against each other; only a combined
+  // acquisition makes one operation safe against itself.
+  const locks = new PathLockRegistry();
+
+  const outcome = await Promise.race([
+    locks.withWriteLocks(['/dir/old.txt', '/dir/new.txt'], async () => 'done'),
+    new Promise((resolve) => setTimeout(() => resolve('DEADLOCKED'), 250))
+  ]);
+
+  assert.equal(outcome, 'done');
+  assert.equal(locks.heldCount, 0, 'every key must be released');
+});
+
+test('a combined acquisition still excludes a concurrent writer under the same parent', async () => {
+  const locks = new PathLockRegistry();
+  const order: string[] = [];
+
+  const first = locks.withWriteLocks(['/dir/a.txt', '/dir/b.txt'], async () => {
+    order.push('first-in');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    order.push('first-out');
+  });
+  const second = locks.withWriteLock('/dir/c.txt', async () => {
+    order.push('second');
+  });
+
+  await Promise.all([first, second]);
+  assert.deepEqual(
+    order,
+    ['first-in', 'first-out', 'second'],
+    'the shared parent must still serialise them'
+  );
+});
+
+test('an operation over two directories releases both parents', async () => {
+  const locks = new PathLockRegistry();
+  await locks.withWriteLocks(['/one/a.txt', '/two/b.txt'], async () => {
+    assert.equal(locks.isLocked('/one'), true);
+    assert.equal(locks.isLocked('/two'), true);
+    assert.equal(locks.isLocked('/one/a.txt'), true);
+  });
+  assert.equal(locks.heldCount, 0);
+});

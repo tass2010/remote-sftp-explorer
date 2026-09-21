@@ -114,7 +114,12 @@ export class HostsTreeProvider
     if (element !== undefined) return [];
     // One shared promise, so two near-simultaneous expansions parse the config once.
     this.#loading ??= this.#load();
-    return this.#loading;
+    await this.#loading;
+    // Return the live list rather than what the promise resolved to. Validation replaces
+    // #items after #load has already settled, so handing back the promise's value pinned the
+    // view to the unvalidated snapshot for good: the redraw fired, VS Code asked again, and
+    // got the same stale array. Descriptions and unusable-host marking never appeared.
+    return this.#items ?? [];
   }
 
   async #load(): Promise<HostTreeItem[]> {

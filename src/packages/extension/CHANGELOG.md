@@ -4,6 +4,11 @@
 
 ### Added
 
+- **Extension Host tests.** `npm run test:integration` runs the extension inside a real VS Code
+  against a fake `ssh` that speaks real SFTP over real pipes: activation, the three views, the
+  file system provider and its error mapping, and losing and regaining a connection. The nine
+  source files that import `vscode` had no runtime test of any kind before this; the three
+  fixes above are what its first run found.
 - **Uploading and downloading files.** On the right-click menu in Remote Files, on the view's
   title bar, and in the command palette.
   - Neither side ever holds the file in memory, so size is bounded by the disk rather than by
@@ -37,6 +42,17 @@
 
 ### Fixed
 
+- **Renaming a file within a directory no longer hangs forever.** `rename` took the lock for
+  the source and then, nested inside it, the lock for the destination. Both cover the parent
+  directory, so the inner acquisition waited on a key the outer one was still holding and
+  nothing could ever release it. Every rename inside one folder -- which is nearly all of them
+  -- deadlocked with no error and no timeout.
+- **Host validation results now reach the list.** `getChildren` returned a cached promise that
+  had resolved to the pre-validation snapshot, so the `ssh -G` descriptions and the marking of
+  unusable hosts were computed, stored, and never shown.
+- **Renaming onto an existing name is refused rather than silently replacing it.**
+  `posix-rename@openssh.com` is atomic and overwrites without complaint, and the provider was
+  discarding the `overwrite: false` it had been given.
 - **A short read no longer leaves a hole in the middle of a file.** Servers may legitimately
   answer a READ with fewer bytes than asked for. The remainder of that range was never
   requested again, so the gap stayed as zeroes -- invisible in a small text file, corruption

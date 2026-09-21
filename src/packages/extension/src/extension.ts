@@ -33,19 +33,74 @@ import { registerFileOperations } from './commands/fileOperations.ts';
 import { registerFileTransfers } from './commands/fileTransfers.ts';
 import { runWithProgress } from './ui/progress.ts';
 
-export function activate(context: vscode.ExtensionContext): void {
+/**
+ * What the Extension Host tests reach in through.
+ *
+ * Returned only under `ExtensionMode.Test`, which VS Code sets when it was launched with
+ * `--extensionTestsPath` and which nothing a user does can produce. So this is a test seam,
+ * not a public API, and it carries no compatibility promise.
+ */
+export interface TestApi {
+  state: ConnectionStateModel;
+  sessions: SessionManager;
+  hosts: HostsTreeProvider;
+  favorites: FavoritesTreeProvider;
+  files: FilesWebviewProvider;
+  fileSystem: RemoteFileSystemProvider;
+}
+
+interface TestOverrides {
+  sshExecutable: string;
+  userConfigPath: string;
+  homeDirectory: string;
+}
+
+/**
+ * Substitutions the tests need, refused outright anywhere else.
+ *
+ * Three things make this extension untestable in the Extension Host as it stands: it refuses
+ * to activate off Windows, it looks for ssh at a fixed Windows path, and it reads the real
+ * user's SSH config. All three are correct in production and all three have to give in a
+ * test, so they give together, behind one gate, rather than as three separate holes.
+ */
+function testOverrides(context: vscode.ExtensionContext): TestOverrides | undefined {
+  if (context.extensionMode !== vscode.ExtensionMode.Test) return undefined;
+  const raw = process.env['REMOTE_SFTP_TEST_OVERRIDES'];
+  if (raw === undefined) return undefined;
+  const parsed = JSON.parse(raw) as Partial<TestOverrides>;
+  if (
+    typeof parsed.sshExecutable !== 'string' ||
+    typeof parsed.userConfigPath !== 'string' ||
+    typeof parsed.homeDirectory !== 'string'
+  ) {
+    throw new Error('REMOTE_SFTP_TEST_OVERRIDES is incomplete.');
+  }
+  return {
+    sshExecutable: parsed.sshExecutable,
+    userConfigPath: parsed.userConfigPath,
+    homeDirectory: parsed.homeDirectory
+  };
+}
+
+export function activate(context: vscode.ExtensionContext): TestApi | undefined {
   const channel = vscode.window.createOutputChannel('Remote SFTP Explorer', { log: true });
   context.subscriptions.push(channel);
   const logger = new OutputChannelLogger(channel);
 
+  const overrides = testOverrides(context);
+
   // Platform gate. Enforced at runtime rather than through npm's os/cpu manifest fields,
   // which would block installing dev dependencies on a Linux development machine.
-  if (process.platform !== 'win32' || process.arch !== 'x64') {
+  //
+  // The tests run on whatever the developer or CI has, and the TypeScript under test is the
+  // same on every platform. What the gate really protects is the Windows-only askpass binary
+  // and the ssh.exe path, and a test run supplies its own executable in place of both.
+  if (overrides === undefined && (process.platform !== 'win32' || process.arch !== 'x64')) {
     logger.error(`Unsupported platform: ${process.platform}-${process.arch}`);
     void vscode.window.showErrorMessage(
       'Remote SFTP Explorer currently supports only Windows 11 x64.'
     );
-    return;
+    return undefined;
   }
 
   const state = new ConnectionStateModel();
@@ -58,8 +113,10 @@ export function activate(context: vscode.ExtensionContext): void {
     prompts: new VsCodePromptUi(),
     logger,
     state,
-    sshExecutable: resolveSshExecutable(),
-    askpassExecutable: resolveAskpassExecutable(context, logger)
+    sshExecutable: overrides?.sshExecutable ?? resolveSshExecutable(),
+    askpassExecutable: overrides === undefined
+      ? resolveAskpassExecutable(context, logger)
+      : undefined
   });
   context.subscriptions.push(sessions);
 
@@ -76,10 +133,10 @@ export function activate(context: vscode.ExtensionContext): void {
     runner: new NodeCommandRunner(),
     state,
     logger,
-    sshExecutable: resolveSshExecutable(),
-    userConfigPath: path.join(os.homedir(), '.ssh', 'config'),
-    systemConfigPath: resolveSystemConfigPath(),
-    homeDirectory: os.homedir()
+    sshExecutable: overrides?.sshExecutable ?? resolveSshExecutable(),
+    userConfigPath: overrides?.userConfigPath ?? path.join(os.homedir(), '.ssh', 'config'),
+    systemConfigPath: overrides === undefined ? resolveSystemConfigPath() : undefined,
+    homeDirectory: overrides?.homeDirectory ?? os.homedir()
   });
 
   const favoritesTree = new FavoritesTreeProvider(favorites, state);
@@ -217,6 +274,9 @@ export function activate(context: vscode.ExtensionContext): void {
   });
 
   logger.info('Remote SFTP Explorer activated.');
+
+  if (context.extensionMode !== vscode.ExtensionMode.Test) return undefined;
+  return { state, sessions, hosts: hostsTree, favorites: favoritesTree, files: filesView, fileSystem };
 }
 
 export function deactivate(): void {

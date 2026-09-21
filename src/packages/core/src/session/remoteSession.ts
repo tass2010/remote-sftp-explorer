@@ -350,15 +350,15 @@ export class RemoteSession {
   async rename(from: string, to: string, signal?: AbortSignal): Promise<void> {
     const source = normalizeRemotePath(from);
     const destination = normalizeRemotePath(to);
-    await this.#locks.withWriteLock(source, () =>
-      this.#locks.withWriteLock(destination, async () => {
-        if (this.#client.capabilities.posixRename) {
-          await this.#client.posixRename(source, destination, signal);
-        } else {
-          await this.#client.rename(source, destination, signal);
-        }
-      })
-    );
+    // Both paths in one acquisition. Nesting the two locks deadlocked whenever they shared a
+    // parent, which for a rename inside one directory is every time.
+    await this.#locks.withWriteLocks([source, destination], async () => {
+      if (this.#client.capabilities.posixRename) {
+        await this.#client.posixRename(source, destination, signal);
+      } else {
+        await this.#client.rename(source, destination, signal);
+      }
+    });
   }
 
   /** Clean up temporary and backup files left by a save that was interrupted. */
