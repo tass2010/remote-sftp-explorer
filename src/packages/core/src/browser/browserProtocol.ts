@@ -16,10 +16,35 @@ export type BrowserMessage =
   | { type: 'navigate'; path: string }
   | { type: 'navigateHistory'; path: string }
   | { type: 'openEntry'; path: string }
-  | { type: 'addFavorite'; path: string };
+  | { type: 'addFavorite'; path: string }
+  // New entries are always created in the directory the browser is listing, so these carry no
+  // path: the host already knows where it is, and accepting one from the page would mean
+  // trusting the client about where a write lands.
+  | { type: 'createFile' }
+  | { type: 'createDirectory' }
+  | { type: 'rename'; path: string }
+  | { type: 'delete'; path: string }
+  // Which row is highlighted, so the palette commands have a target when they are invoked
+  // without one. Sent on focus changes only, not on every render.
+  | { type: 'select'; path: string };
 
-const PATHLESS = new Set(['ready', 'refresh', 'navigateParent', 'clearHistory']);
-const WITH_PATH = new Set(['navigate', 'navigateHistory', 'openEntry', 'addFavorite']);
+const PATHLESS = new Set([
+  'ready',
+  'refresh',
+  'navigateParent',
+  'clearHistory',
+  'createFile',
+  'createDirectory'
+]);
+const WITH_PATH = new Set([
+  'navigate',
+  'navigateHistory',
+  'openEntry',
+  'addFavorite',
+  'rename',
+  'delete',
+  'select'
+]);
 
 /**
  * Parse a message from the webview, or return undefined.

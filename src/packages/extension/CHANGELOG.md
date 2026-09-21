@@ -1,5 +1,41 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Creating, renaming and deleting remote files and folders.** The operations had been
+  implemented and tested since the rebuild, but nothing in the interface reached them, so a
+  file browser could not manage files. They are now on a right-click menu in Remote Files, on
+  the view's title bar, and in the command palette.
+  - Deleting always asks first, and says what it is about to delete: a folder is counted
+    beforehand, so "delete this folder" and "delete this folder and the 412 things inside it"
+    are distinguishable before the button is pressed rather than after.
+  - A new file is created with EXCL and opened, so it can never silently truncate a file that
+    appeared since the name was typed. A rename never overwrites.
+  - The menu is reachable from the keyboard with the menu key or Shift+F10, and navigable with
+    the arrow keys.
+- Every command now carries a category, so the palette shows "Remote SFTP: Delete" rather than
+  a bare "Delete" among everything else that offers one.
+
+### Changed
+
+- Right-clicking a row opens a menu instead of immediately adding it to favourites. Adding to
+  favourites is now an item on that menu.
+
+### Fixed
+
+- **The host list appears without waiting for every host to be probed.** It ran `ssh -G` for
+  each configured alias and awaited all of them before drawing a single row -- far worse with
+  `Match exec` or canonicalisation, which run commands and resolve DNS. Probing now happens in
+  the background, four at a time.
+- **Opening a file makes two fewer round trips.** It stat'ed the file twice before reading a
+  byte, and waited for a CLOSE reply nobody reads. Directory listings no longer wait for that
+  reply either.
+- A refresh arriving while hosts were being probed could be overwritten by the older results,
+  because the guard compared list lengths and a refresh usually produces a list of the same
+  length.
+
 ## 0.3.0
 
 A rebuild. The previous implementation had drifted from its design in ways nothing caught, and

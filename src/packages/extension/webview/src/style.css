@@ -253,3 +253,62 @@ body.resizing {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ---------------------------------------------------------------------------
+   Context menu
+   --------------------------------------------------------------------------- */
+
+/* Fixed, not absolute: the coordinates come from a pointer event, which reports viewport
+   coordinates, and the grid it is opened over scrolls. */
+.menu {
+  position: fixed;
+  z-index: 10;
+  min-width: 160px;
+  padding: 4px 0;
+  color: var(--vscode-menu-foreground, var(--vscode-foreground));
+  background: var(--vscode-menu-background, var(--vscode-editorWidget-background));
+  border: 1px solid var(--vscode-menu-border, var(--vscode-editorWidget-border, transparent));
+  border-radius: 5px;
+  box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.36));
+}
+
+.menu .menuitem {
+  display: block;
+  width: 100%;
+  padding: 3px 12px;
+  font-family: inherit;
+  font-size: inherit;
+  text-align: left;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+/* Hover and keyboard focus must look the same: a menu driven by arrow keys is unusable if the
+   current item is only distinguishable when a mouse happens to be over it. */
+.menu .menuitem:hover,
+.menu .menuitem:focus {
+  color: var(--vscode-menu-selectionForeground, var(--vscode-list-activeSelectionForeground));
+  background: var(--vscode-menu-selectionBackground, var(--vscode-list-activeSelectionBackground));
+  outline: none;
+}
+
+/* The divider is drawn as a border on the item below it, so no separator element is needed
+   and nothing non-focusable ends up inside the menu's roving focus order. */
+.menu .menuitem.divider {
+  margin-top: 4px;
+  padding-top: 7px;
+  border-top: 1px solid var(--vscode-menu-separatorBackground, var(--vscode-panel-border, transparent));
+}
+
+/* Destructive actions read as destructive before they are clicked, not only in the dialog. */
+.menu .menuitem.danger {
+  color: var(--vscode-errorForeground);
+}
+
+.menu .menuitem.danger:hover,
+.menu .menuitem.danger:focus {
+  color: var(--vscode-menu-selectionForeground, var(--vscode-list-activeSelectionForeground));
+}

@@ -85,6 +85,11 @@ ${options.style}
   <div id="rows" class="rows"></div>
 </div>
 <div id="footer" class="footer"></div>
+<!-- The context menu is built here rather than contributed to VS Code: the view/item/context
+     contribution point applies to TreeView items, and this list is a webview, so its rows are
+     invisible to the menu system. Items are created from script with textContent, never
+     markup, because a label can carry a remote filename. -->
+<div id="menu" class="menu" role="menu" aria-label="File actions" hidden></div>
 <script nonce="${nonce}">
 ${options.script}
 </script>

@@ -98,6 +98,28 @@
         "command": "remoteSftp.clearHistory",
         "title": "Clear Directory History",
         "category": "Remote SFTP"
+      },
+      {
+        "command": "remoteSftp.newFile",
+        "title": "New File",
+        "icon": "$(new-file)",
+        "category": "Remote SFTP"
+      },
+      {
+        "command": "remoteSftp.newFolder",
+        "title": "New Folder",
+        "icon": "$(new-folder)",
+        "category": "Remote SFTP"
+      },
+      {
+        "command": "remoteSftp.rename",
+        "title": "Rename",
+        "category": "Remote SFTP"
+      },
+      {
+        "command": "remoteSftp.delete",
+        "title": "Delete",
+        "category": "Remote SFTP"
       }
     ],
     "viewsContainers": {
@@ -151,6 +173,16 @@
       ],
       "view/title": [
         {
+          "command": "remoteSftp.newFile",
+          "when": "view == remoteSftp.files && remoteSftp.connected",
+          "group": "navigation@1"
+        },
+        {
+          "command": "remoteSftp.newFolder",
+          "when": "view == remoteSftp.files && remoteSftp.connected",
+          "group": "navigation@2"
+        },
+        {
           "command": "remoteSftp.refreshHosts",
           "when": "view == remoteSftp.hosts",
           "group": "navigation@1"
@@ -158,17 +190,35 @@
         {
           "command": "remoteSftp.refreshFiles",
           "when": "view == remoteSftp.files && remoteSftp.connected",
-          "group": "navigation@1"
+          "group": "navigation@3"
         },
         {
           "command": "remoteSftp.disconnect",
           "when": "view == remoteSftp.files && remoteSftp.connected",
-          "group": "navigation@2"
+          "group": "navigation@4"
         },
         {
           "command": "remoteSftp.clearHistory",
           "when": "view == remoteSftp.files",
           "group": "2_history@1"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "remoteSftp.newFile",
+          "when": "remoteSftp.connected"
+        },
+        {
+          "command": "remoteSftp.newFolder",
+          "when": "remoteSftp.connected"
+        },
+        {
+          "command": "remoteSftp.rename",
+          "when": "remoteSftp.connected"
+        },
+        {
+          "command": "remoteSftp.delete",
+          "when": "remoteSftp.connected"
         }
       ]
     }

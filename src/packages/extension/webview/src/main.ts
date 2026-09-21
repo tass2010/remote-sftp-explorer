@@ -65,6 +65,7 @@ const sortBar = document.querySelector('.sortbar') as HTMLDivElement;
 const rowsContainer = document.getElementById('rows') as HTMLDivElement;
 const statusBar = document.getElementById('status') as HTMLDivElement;
 const footer = document.getElementById('footer') as HTMLDivElement;
+const menu = document.getElementById('menu') as HTMLDivElement;
 
 /** As received from the host, in whatever order it sent them. */
 let received: BrowserEntry[] = [];
@@ -246,6 +247,156 @@ sortBar.addEventListener('click', (event) => {
 });
 
 // ---------------------------------------------------------------------------
+// Context menu
+// ---------------------------------------------------------------------------
+
+interface MenuItem {
+  label: string;
+  run(): void;
+  /** Draw a separating rule above this item. */
+  dividerBefore?: boolean;
+  /** Mark the item as destructive. */
+  danger?: boolean;
+}
+
+/** Where focus was before the menu opened, so Escape can hand it back. */
+let menuReturnFocus: HTMLElement | undefined;
+
+function menuItems(): HTMLButtonElement[] {
+  return [...menu.querySelectorAll<HTMLButtonElement>('.menuitem')];
+}
+
+function closeMenu(restoreFocus: boolean): void {
+  if (menu.hidden) return;
+  menu.hidden = true;
+  menu.replaceChildren();
+  const previous = menuReturnFocus;
+  menuReturnFocus = undefined;
+  // Only on a deliberate dismissal. After activating an item the action decides where focus
+  // belongs -- often a VS Code input box, which pulling focus back here would fight.
+  if (restoreFocus) previous?.focus();
+}
+
+function openMenu(x: number, y: number, items: readonly MenuItem[]): void {
+  if (items.length === 0) return;
+  closeMenu(false);
+  menuReturnFocus =
+    document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
+
+  const fragment = document.createDocumentFragment();
+  for (const item of items) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `menuitem${item.dividerBefore === true ? ' divider' : ''}${
+      item.danger === true ? ' danger' : ''
+    }`;
+    button.setAttribute('role', 'menuitem');
+    // Roving focus: the menu owns Tab while it is open, so no item is in the page's tab order.
+    button.tabIndex = -1;
+    // A label can carry a remote filename, so it is written as text and never as markup.
+    button.textContent = item.label;
+    button.addEventListener('click', () => {
+      closeMenu(false);
+      item.run();
+    });
+    fragment.append(button);
+  }
+  menu.replaceChildren(fragment);
+
+  // Place it at the origin and reveal it before measuring: the height depends on how many
+  // items were just built, and a menu opened near the bottom edge would otherwise appear in
+  // the wrong place for one frame before being corrected.
+  menu.style.left = '0px';
+  menu.style.top = '0px';
+  menu.hidden = false;
+  const bounds = menu.getBoundingClientRect();
+  const margin = 2;
+  menu.style.left = `${Math.max(margin, Math.min(x, window.innerWidth - bounds.width - margin))}px`;
+  menu.style.top = `${Math.max(margin, Math.min(y, window.innerHeight - bounds.height - margin))}px`;
+
+  menuItems()[0]?.focus();
+}
+
+menu.addEventListener('keydown', (event) => {
+  const items = menuItems();
+  if (items.length === 0) return;
+  const index = items.indexOf(document.activeElement as HTMLButtonElement);
+
+  switch (event.key) {
+    case 'ArrowDown':
+      event.preventDefault();
+      // Wrapping, as menus do: reaching the end and pressing down again returns to the top.
+      items[(index + 1) % items.length]?.focus();
+      return;
+    case 'ArrowUp':
+      event.preventDefault();
+      items[(index - 1 + items.length) % items.length]?.focus();
+      return;
+    case 'Home':
+      event.preventDefault();
+      items[0]?.focus();
+      return;
+    case 'End':
+      event.preventDefault();
+      items[items.length - 1]?.focus();
+      return;
+    case 'Escape':
+    case 'Tab':
+      event.preventDefault();
+      closeMenu(true);
+      return;
+    default:
+  }
+});
+
+// Capture, so a click anywhere dismisses the menu before that click does anything else.
+document.addEventListener(
+  'pointerdown',
+  (event) => {
+    if (!menu.hidden && !menu.contains(event.target as Node)) closeMenu(false);
+  },
+  true
+);
+// A menu positioned in viewport coordinates would be left behind by any of these.
+document.addEventListener('scroll', () => closeMenu(false), true);
+window.addEventListener('resize', () => closeMenu(false));
+window.addEventListener('blur', () => closeMenu(false));
+
+function entryMenu(entry: BrowserEntry): MenuItem[] {
+  const items: MenuItem[] = [
+    {
+      label: entry.type === 'directory' ? 'Open Folder' : 'Open',
+      run: () => openEntry(entry)
+    },
+    { label: 'New File', dividerBefore: true, run: () => post({ type: 'createFile' }) },
+    { label: 'New Folder', run: () => post({ type: 'createDirectory' }) },
+    {
+      label: 'Rename\u2026',
+      dividerBefore: true,
+      run: () => post({ type: 'rename', path: entry.path })
+    },
+    { label: 'Delete\u2026', danger: true, run: () => post({ type: 'delete', path: entry.path }) }
+  ];
+  if (entry.canFavorite) {
+    items.push({
+      label: 'Add to Favorites',
+      dividerBefore: true,
+      run: () => post({ type: 'addFavorite', path: entry.path })
+    });
+  }
+  return items;
+}
+
+/** The menu for empty space: there is no entry under the pointer, so nothing targets one. */
+function directoryMenu(): MenuItem[] {
+  return [
+    { label: 'New File', run: () => post({ type: 'createFile' }) },
+    { label: 'New Folder', run: () => post({ type: 'createDirectory' }) },
+    { label: 'Refresh', dividerBefore: true, run: () => post({ type: 'refresh' }) }
+  ];
+}
+
+// ---------------------------------------------------------------------------
 // Rows
 // ---------------------------------------------------------------------------
 
@@ -289,6 +440,18 @@ function openEntry(entry: BrowserEntry): void {
   post({ type: 'openEntry', path: entry.path });
 }
 
+/**
+ * Tell the host which row is highlighted.
+ *
+ * This is what lets Rename and Delete work from the command palette, where there is no row to
+ * pass. Nothing is sent for an empty listing: the host re-resolves the path against its own
+ * entries, so a stale selection resolves to nothing rather than to the wrong file.
+ */
+function notifySelection(): void {
+  const entry = entries[focusedIndex];
+  if (entry !== undefined) post({ type: 'select', path: entry.path });
+}
+
 function cell(className: string, text: string): HTMLSpanElement {
   const element = document.createElement('span');
   element.setAttribute('role', 'gridcell');
@@ -322,10 +485,15 @@ function buildRow(entry: BrowserEntry, index: number): HTMLDivElement {
   row.addEventListener('focus', () => {
     focusedIndex = index;
     updateFooter();
+    notifySelection();
   });
   row.addEventListener('contextmenu', (event) => {
     event.preventDefault();
-    if (entry.canFavorite) post({ type: 'addFavorite', path: entry.path });
+    // Without this the container's own handler would also fire and replace this menu with the
+    // empty-space one.
+    event.stopPropagation();
+    focusRow(index);
+    openMenu(event.clientX, event.clientY, entryMenu(entry));
   });
 
   return row;
@@ -359,6 +527,7 @@ function renderRows(): void {
 
   applyRovingTabIndex();
   updateFooter();
+  notifySelection();
 }
 
 function render(state: BrowserState): void {
@@ -423,7 +592,31 @@ pathInput.addEventListener('input', (event) => {
 
 pathInput.addEventListener('blur', () => showPathTail());
 
+/**
+ * Right-clicking below the last row targets the directory rather than an entry.
+ *
+ * Rows stop their own contextmenu event, so reaching here means the pointer was over empty
+ * space -- the one place where "new file here" is unambiguous and nothing else applies.
+ */
+rowsContainer.addEventListener('contextmenu', (event) => {
+  event.preventDefault();
+  openMenu(event.clientX, event.clientY, directoryMenu());
+});
+
 rowsContainer.addEventListener('keydown', (event) => {
+  // The menu key and Shift+F10 are how a keyboard reaches a context menu; without them every
+  // one of these actions would be mouse-only.
+  if (event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)) {
+    event.preventDefault();
+    const selected = entries[focusedIndex];
+    if (selected === undefined) return;
+    // Anchor it to the row, not the pointer: there is no pointer in this path.
+    const rows = rowsContainer.querySelectorAll<HTMLDivElement>('[role="row"]');
+    const rect = rows[focusedIndex]?.getBoundingClientRect();
+    openMenu(rect?.left ?? 0, rect?.bottom ?? 0, entryMenu(selected));
+    return;
+  }
+
   switch (event.key) {
     case 'ArrowDown':
       event.preventDefault();

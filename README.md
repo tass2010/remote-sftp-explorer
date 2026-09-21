@@ -10,9 +10,9 @@ all keep working exactly as they do on the command line.
 
 ## Status
 
-**Early, and Windows-only.** Browsing, opening, editing and saving all work. Creating,
-renaming, deleting, uploading and downloading do not yet have a user interface. Read
-[Limitations](#limitations) before installing — it is a short list and an honest one.
+**Early, and Windows-only.** Browsing, opening, editing, saving, creating, renaming and
+deleting all work. Uploading and downloading local files do not yet have a user interface.
+Read [Limitations](#limitations) before installing — it is a short list and an honest one.
 
 ## How it works
 
@@ -81,9 +81,9 @@ Stated plainly, so you can decide before installing:
 
 - **Windows 11 x64 only.** macOS and Linux clients are not supported. The extension refuses to
   activate elsewhere rather than half-working.
-- **No file management UI yet.** Creating, renaming, deleting, uploading and downloading are
-  not reachable from the interface. The underlying operations exist; the commands and menus do
-  not.
+- **No upload or download yet.** Files are created and edited in place. Moving a file between
+  your machine and the server has no interface; copy its contents through an editor for now.
+- **No drag and drop, and no multi-select.** File actions apply to one entry at a time.
 - **One connection at a time.** Opening a host replaces the current session.
 - **English only.**
 - **No remote change detection.** The panel does not notice edits made on the server by

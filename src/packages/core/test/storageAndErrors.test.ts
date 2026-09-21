@@ -16,6 +16,7 @@ import {
   type BrowserEntry,
   type SortOrder
 } from '../src/browser/browserProtocol.ts';
+import { describeNameProblem, nameStemRange } from '../src/fs/remotePath.ts';
 import type { Memento } from '../src/ports.ts';
 
 class MemoryMemento implements Memento {
@@ -402,4 +403,68 @@ test('sorting does not mutate the array it was given', () => {
   const rows = [entry('b.txt'), entry('a.txt')];
   sortBrowserEntries(rows, order('name', 'asc'));
   assert.deepEqual(names(rows), ['b.txt', 'a.txt']);
+});
+
+// ---------------------------------------------------------------------------
+// File management messages and name prompts
+// ---------------------------------------------------------------------------
+
+test('the mutating messages are on the allowlist and carry what they need', () => {
+  // Creates deliberately carry no path: the host already knows which directory is listed, and
+  // accepting one from the page would mean trusting the client about where a write lands.
+  assert.deepEqual(parseBrowserMessage({ type: 'createFile' }), { type: 'createFile' });
+  assert.deepEqual(parseBrowserMessage({ type: 'createDirectory' }), { type: 'createDirectory' });
+  assert.deepEqual(parseBrowserMessage({ type: 'createFile', path: '/etc' }), {
+    type: 'createFile'
+  });
+
+  for (const type of ['rename', 'delete', 'select']) {
+    assert.deepEqual(parseBrowserMessage({ type, path: '/srv/app/notes.txt' }), {
+      type,
+      path: '/srv/app/notes.txt'
+    });
+    assert.equal(parseBrowserMessage({ type }), undefined, `${type} must carry a path`);
+  }
+});
+
+test('a delete path is normalised like every other path from the page', () => {
+  // The one message where a traversal surviving would be worst.
+  assert.deepEqual(parseBrowserMessage({ type: 'delete', path: '/srv/app/../../etc' }), {
+    type: 'delete',
+    path: '/etc'
+  });
+  assert.equal(parseBrowserMessage({ type: 'delete', path: 'relative' }), undefined);
+  assert.equal(parseBrowserMessage({ type: 'delete', path: '/srv/\0' }), undefined);
+});
+
+test('a name the server would reject is refused before it is sent', () => {
+  assert.ok(describeNameProblem('') !== undefined, 'empty');
+  assert.ok(describeNameProblem('.') !== undefined, 'dot');
+  assert.ok(describeNameProblem('..') !== undefined, 'dot dot');
+  assert.ok(describeNameProblem('a/b') !== undefined, 'separator');
+  assert.ok(describeNameProblem('a\0b') !== undefined, 'NUL');
+  assert.equal(describeNameProblem('notes.txt'), undefined);
+  // Unusual but legal on a POSIX server, so we must not invent a restriction of our own.
+  assert.equal(describeNameProblem('a name with spaces'), undefined);
+  assert.equal(describeNameProblem('.bashrc'), undefined);
+});
+
+test('a name already in the folder is reported, except when it is the current one', () => {
+  const taken = ['notes.txt', 'src'];
+  assert.ok(describeNameProblem('notes.txt', { taken })?.includes('already exists'));
+  assert.equal(describeNameProblem('other.txt', { taken }), undefined);
+  // Renaming something to what it is already called is a no-op, not a collision with itself.
+  assert.equal(describeNameProblem('notes.txt', { taken, current: 'notes.txt' }), undefined);
+  assert.ok(describeNameProblem('src', { taken, current: 'notes.txt' }) !== undefined);
+});
+
+test('renaming preselects the stem so the extension need not be retyped', () => {
+  assert.deepEqual(nameStemRange('notes.txt'), [0, 5]);
+  // The last dot wins, matching what VS Code's own rename does with archive.tar.gz.
+  assert.deepEqual(nameStemRange('archive.tar.gz'), [0, 11]);
+  assert.deepEqual(nameStemRange('Makefile'), [0, 8]);
+  // A leading dot is part of the name, not an extension marker; selecting nothing would leave
+  // the user staring at an apparently inert box.
+  assert.deepEqual(nameStemRange('.bashrc'), [0, 7]);
+  assert.equal(nameStemRange(''), undefined);
 });

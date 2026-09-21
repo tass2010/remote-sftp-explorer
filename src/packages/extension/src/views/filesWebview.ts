@@ -52,6 +52,8 @@ export class FilesWebviewProvider implements vscode.WebviewViewProvider, vscode.
   #lastRootPath: string | undefined;
   /** Last known listing per host+path, so a dropped connection still shows something. */
   readonly #cache = new Map<string, BrowserEntry[]>();
+  /** The row the page says is highlighted. Resolved against the live listing, never trusted. */
+  #selectedPath: string | undefined;
 
   constructor(options: FilesWebviewOptions) {
     this.#options = options;
@@ -85,6 +87,32 @@ export class FilesWebviewProvider implements vscode.WebviewViewProvider, vscode.
     view.onDidDispose(() => {
       this.#view = undefined;
     });
+  }
+
+  /** Where the browser is listing, and so where a new file or folder is created. */
+  get currentDirectory(): string | undefined {
+    return this.#currentPath;
+  }
+
+  /**
+   * The highlighted entry, or undefined when there is not one any more.
+   *
+   * Re-resolved against the current listing on every call rather than remembered as an object:
+   * after a refresh the row may be gone, and acting on a path that has since disappeared would
+   * be worse than reporting that nothing is selected.
+   */
+  get selectedEntry(): BrowserEntry | undefined {
+    if (this.#selectedPath === undefined) return undefined;
+    return this.#entries.find((entry) => entry.path === this.#selectedPath);
+  }
+
+  entryAt(path: string): BrowserEntry | undefined {
+    return this.#entries.find((entry) => entry.path === path);
+  }
+
+  /** Names in the listed directory, so a name prompt can reject a duplicate as it is typed. */
+  get entryNames(): readonly string[] {
+    return this.#entries.map((entry) => entry.name);
   }
 
   async navigate(path: string): Promise<void> {
@@ -193,6 +221,25 @@ export class FilesWebviewProvider implements vscode.WebviewViewProvider, vscode.
         this.#post();
         return;
       }
+      case 'select':
+        this.#selectedPath = message.path;
+        return;
+      // These four go through the commands rather than acting directly, so the context menu
+      // and the command palette run exactly the same code. The message type decides which
+      // command; nothing from the page reaches `executeCommand` except an already-normalised
+      // path.
+      case 'createFile':
+        await vscode.commands.executeCommand('remoteSftp.newFile');
+        return;
+      case 'createDirectory':
+        await vscode.commands.executeCommand('remoteSftp.newFolder');
+        return;
+      case 'rename':
+        await vscode.commands.executeCommand('remoteSftp.rename', message.path);
+        return;
+      case 'delete':
+        await vscode.commands.executeCommand('remoteSftp.delete', message.path);
+        return;
       case 'addFavorite': {
         const entry = this.#entries.find((candidate) => candidate.path === message.path);
         if (entry === undefined || entry.type === 'other' || entry.type === 'symlink') return;

@@ -29,6 +29,8 @@ import {
 } from './views/favoritesTree.ts';
 import { FILES_VIEW_ID, FilesWebviewProvider } from './views/filesWebview.ts';
 import { ConnectionStatusBar } from './statusBar.ts';
+import { registerFileOperations } from './commands/fileOperations.ts';
+import { runWithProgress } from './ui/progress.ts';
 
 export function activate(context: vscode.ExtensionContext): void {
   const channel = vscode.window.createOutputChannel('Remote SFTP Explorer', { log: true });
@@ -200,6 +202,10 @@ export function activate(context: vscode.ExtensionContext): void {
     });
   });
 
+  // Creating, renaming and deleting. Registered from their own module because they share a
+  // name prompt and a confirmation, none of which the connection commands need.
+  registerFileOperations(context, { sessions, files: filesView, fileSystem });
+
   register('remoteSftp.clearHistory', async () => {
     const alias = sessions.alias;
     await history.clear(alias);
@@ -227,19 +233,6 @@ async function pickHost(hostsTree: HostsTreeProvider): Promise<string | undefine
     { placeHolder: 'Select an SSH host' }
   );
   return picked?.label;
-}
-
-async function runWithProgress(title: string, work: () => Promise<void>): Promise<void> {
-  try {
-    await vscode.window.withProgress(
-      { location: vscode.ProgressLocation.Notification, title, cancellable: false },
-      work
-    );
-  } catch (error) {
-    void vscode.window.showErrorMessage(
-      error instanceof Error ? error.message : String(error)
-    );
-  }
 }
 
 function resolveSshExecutable(): string {

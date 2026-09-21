@@ -55,3 +55,41 @@ export function isWithin(root: string, candidate: string): boolean {
     normalizedCandidate.startsWith(`${normalizedRoot}/`)
   );
 }
+
+/**
+ * Explain what is wrong with a name the user typed, or return undefined when nothing is.
+ *
+ * This runs while an input box validates, so the string it returns is what the user reads as
+ * they type. The duplicate check is a convenience rather than a guarantee -- the directory can
+ * change between the keystroke and the create -- so the operation itself still has to rely on
+ * the server refusing a name that is already taken.
+ */
+export function describeNameProblem(
+  name: string,
+  options: { taken?: Iterable<string> | undefined; current?: string | undefined } = {}
+): string | undefined {
+  try {
+    assertValidName(name);
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+  // Renaming something to what it is already called is a no-op, not a collision with itself.
+  if (options.current !== undefined && name === options.current) return undefined;
+  for (const existing of options.taken ?? []) {
+    if (existing === name) return `"${name}" already exists in this folder.`;
+  }
+  return undefined;
+}
+
+/**
+ * The span of a filename to preselect when it is offered for editing.
+ *
+ * Everything before the final dot, so renaming does not mean retyping the extension. A leading
+ * dot is part of the name rather than an extension marker, so `.bashrc` selects whole -- the
+ * alternative would preselect nothing and leave the user staring at an apparently inert box.
+ */
+export function nameStemRange(value: string): [number, number] | undefined {
+  if (value.length === 0) return undefined;
+  const dot = value.lastIndexOf('.');
+  return dot > 0 ? [0, dot] : [0, value.length];
+}
