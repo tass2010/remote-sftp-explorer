@@ -11,6 +11,12 @@ import {
 import { SshTransport, type SshTransportOptions } from '../transport/sshTransport.ts';
 import { PathLockRegistry } from '../locks/pathLockRegistry.ts';
 import { safeReplace, sweepArtifacts, type SafeReplaceResult } from '../fs/safeReplace.ts';
+import {
+  runTransfer,
+  type TransferProgress,
+  type TransferSink,
+  type TransferSource
+} from '../transfer/fileTransfer.ts';
 import { joinRemotePath, normalizeRemotePath, parentRemotePath } from '../fs/remotePath.ts';
 import type { Logger } from '../ports.ts';
 
@@ -42,6 +48,7 @@ export class RemoteSession {
   readonly #locks = new PathLockRegistry();
   readonly #randomToken: () => string;
   readonly #logger: Logger | undefined;
+  readonly #clock: Clock;
 
   #rootPath = '/';
   #closed = false;
@@ -53,6 +60,7 @@ export class RemoteSession {
     this.#client = client;
     this.#randomToken = options.randomToken;
     this.#logger = options.logger;
+    this.#clock = options.clock;
   }
 
   static async connect(options: RemoteSessionOptions): Promise<RemoteSession> {
@@ -156,6 +164,102 @@ export class RemoteSession {
 
   async readlink(target: string, signal?: AbortSignal): Promise<string> {
     return this.#client.readlink(normalizeRemotePath(target), signal);
+  }
+
+  // -------------------------------------------------------------------------
+  // Whole-file transfers
+  // -------------------------------------------------------------------------
+
+  /**
+   * Copy a remote file to a sink, without ever holding it in memory.
+   *
+   * The sink is closed here whatever happens, including a cancellation: a half-written local
+   * file with an open handle is the worst of both outcomes. Whether to delete that partial
+   * file is the caller's decision, because only the caller knows whether it overwrote
+   * something.
+   */
+  async download(
+    target: string,
+    sink: TransferSink,
+    options: {
+      signal?: AbortSignal | undefined;
+      onProgress?: ((progress: TransferProgress) => void) | undefined;
+      stallMs?: number | undefined;
+    } = {}
+  ): Promise<{ bytes: number }> {
+    const path = normalizeRemotePath(target);
+    const entry = await this.stat(path, options.signal);
+    if (entry.type === 'directory') {
+      throw new Error(`${path} is a directory. Only files can be downloaded.`);
+    }
+    const total = Number(entry.size);
+
+    try {
+      await runTransfer({
+        clock: this.#clock,
+        what: `Downloading ${path}`,
+        total,
+        signal: options.signal,
+        onProgress: options.onProgress,
+        stallMs: options.stallMs,
+        run: async ({ signal, report }) => {
+          await this.#client.readTo(path, {
+            size: entry.size,
+            write: (offset, chunk) => sink.write(offset, chunk),
+            signal,
+            onProgress: report
+          });
+        }
+      });
+    } finally {
+      await sink.close();
+    }
+    return { bytes: total };
+  }
+
+  /**
+   * Copy a local source onto the server.
+   *
+   * Goes through the same replace sequence a save does -- temporary file, fsync, atomic
+   * rename or backup fallback -- rather than opening the destination with TRUNC. On a link
+   * bad enough to interrupt an upload, truncating first is precisely how a good file becomes
+   * a half-written one.
+   */
+  async upload(
+    target: string,
+    source: TransferSource,
+    options: {
+      signal?: AbortSignal | undefined;
+      onProgress?: ((progress: TransferProgress) => void) | undefined;
+      stallMs?: number | undefined;
+    } = {}
+  ): Promise<SafeReplaceResult> {
+    const path = normalizeRemotePath(target);
+
+    try {
+      return await this.#locks.withWriteLock(path, async () =>
+        runTransfer({
+          clock: this.#clock,
+          what: `Uploading to ${path}`,
+          total: source.size,
+          signal: options.signal,
+          onProgress: options.onProgress,
+          stallMs: options.stallMs,
+          run: async ({ signal, report }) =>
+            safeReplace({
+              client: this.#client,
+              path,
+              content: source,
+              randomToken: this.#randomToken,
+              logger: this.#logger,
+              signal,
+              onProgress: report
+            })
+        })
+      );
+    } finally {
+      await source.close();
+    }
   }
 
   // -------------------------------------------------------------------------

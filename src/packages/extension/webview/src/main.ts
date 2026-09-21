@@ -371,6 +371,12 @@ function entryMenu(entry: BrowserEntry): MenuItem[] {
     { label: 'New File', dividerBefore: true, run: () => post({ type: 'createFile' }) },
     { label: 'New Folder', run: () => post({ type: 'createDirectory' }) },
     {
+      label: 'Download\u2026',
+      dividerBefore: true,
+      run: () => post({ type: 'download', path: entry.path })
+    },
+    { label: 'Upload Here\u2026', run: () => post({ type: 'upload' }) },
+    {
       label: 'Rename\u2026',
       dividerBefore: true,
       run: () => post({ type: 'rename', path: entry.path })
@@ -392,6 +398,7 @@ function directoryMenu(): MenuItem[] {
   return [
     { label: 'New File', run: () => post({ type: 'createFile' }) },
     { label: 'New Folder', run: () => post({ type: 'createDirectory' }) },
+    { label: 'Upload Here\u2026', dividerBefore: true, run: () => post({ type: 'upload' }) },
     { label: 'Refresh', dividerBefore: true, run: () => post({ type: 'refresh' }) }
   ];
 }

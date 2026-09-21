@@ -418,7 +418,11 @@ test('the mutating messages are on the allowlist and carry what they need', () =
     type: 'createFile'
   });
 
-  for (const type of ['rename', 'delete', 'select']) {
+  // Upload targets the listed directory, so like the creates it carries no path.
+  assert.deepEqual(parseBrowserMessage({ type: 'upload' }), { type: 'upload' });
+  assert.deepEqual(parseBrowserMessage({ type: 'upload', path: '/etc' }), { type: 'upload' });
+
+  for (const type of ['rename', 'delete', 'select', 'download']) {
     assert.deepEqual(parseBrowserMessage({ type, path: '/srv/app/notes.txt' }), {
       type,
       path: '/srv/app/notes.txt'

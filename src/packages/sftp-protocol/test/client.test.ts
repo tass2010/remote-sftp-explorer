@@ -275,7 +275,12 @@ test('a short read is not mistaken for end of file', async () => {
 
   const { client } = await connect(server);
   const result = await client.readFile('/f', { size: BigInt(content.length) });
+
   assert.equal(result.length, 300);
+  // Asserting the length alone proves nothing: the buffer is allocated at the full size, so a
+  // range that was requested once, answered short, and never asked for again still measures
+  // 300 -- it is just full of zeroes in the middle. Only the contents catch that.
+  assert.deepEqual(result, content, 'every byte must be fetched, not just the first short read');
 });
 
 test('a failing read surfaces its own error, not a close error', async () => {
@@ -400,4 +405,112 @@ test('cancellation abandons the request and rejects the caller', async () => {
 
   await assert.rejects(() => pending, /cancelled/);
   assert.equal(client.closed, false);
+});
+
+// ---------------------------------------------------------------------------
+// Streaming transfers
+// ---------------------------------------------------------------------------
+
+function fileServer(content: Uint8Array): FakeSftpServer {
+  const server = new FakeSftpServer();
+  server.on(PacketType.Open, ({ requestId }) =>
+    FakeSftpServer.handle(requestId, new Uint8Array([1]))
+  );
+  server.on(PacketType.Close, ({ requestId }) => FakeSftpServer.status(requestId, StatusCode.Ok));
+  server.on(PacketType.Read, ({ requestId, reader }) => {
+    reader.stringBytes();
+    const offset = Number(reader.uint64());
+    const length = reader.uint32();
+    if (offset >= content.length) return FakeSftpServer.status(requestId, StatusCode.Eof);
+    return FakeSftpServer.data(
+      requestId,
+      content.subarray(offset, Math.min(offset + length, content.length))
+    );
+  });
+  return server;
+}
+
+test('a download never holds the whole file, and lands every byte at its own offset', async () => {
+  // The point of readTo: chunks are handed over as they arrive, with the offset they belong
+  // at, because many reads are in flight and they do not come back in order.
+  const content = Uint8Array.from({ length: 1000 }, (_unused, index) => index % 251);
+  const { client } = await connect(fileServer(content));
+
+  const received = new Uint8Array(content.length);
+  const offsets: number[] = [];
+  await client.readTo('/f', {
+    size: BigInt(content.length),
+    write: (offset, chunk) => {
+      offsets.push(offset);
+      received.set(chunk, offset);
+    }
+  });
+
+  assert.deepEqual(received, content);
+  assert.ok(offsets.length > 0, 'the sink must actually be called');
+});
+
+test('a sink slower than the link does not queue chunks in memory', async () => {
+  // The sink is awaited inside the slot, so a slow disk stops the window refilling rather
+  // than letting unwritten chunks pile up.
+  const content = new Uint8Array(4096).fill(3);
+  const { client } = await connect(fileServer(content));
+
+  let concurrent = 0;
+  let peak = 0;
+  await client.readTo('/f', {
+    size: BigInt(content.length),
+    write: async () => {
+      concurrent += 1;
+      peak = Math.max(peak, concurrent);
+      await Promise.resolve();
+      concurrent -= 1;
+    }
+  });
+
+  assert.ok(peak <= 32, `at most one window of chunks may be in the sink at once, saw ${peak}`);
+});
+
+test('an upload pulls from its source rather than being handed a buffer', async () => {
+  const written = new Map<number, Uint8Array>();
+  const server = new FakeSftpServer();
+  server.on(PacketType.Write, ({ requestId, reader }) => {
+    reader.stringBytes();
+    const offset = Number(reader.uint64());
+    written.set(offset, Uint8Array.from(reader.stringBytes()));
+    return FakeSftpServer.status(requestId, StatusCode.Ok);
+  });
+
+  const { client } = await connect(server);
+  const source = Uint8Array.from({ length: 700 }, (_unused, index) => index % 251);
+  let pulls = 0;
+
+  await client.writeFrom(new Uint8Array([1]), {
+    total: source.length,
+    read: (offset, length) => {
+      pulls += 1;
+      return source.subarray(offset, offset + length);
+    }
+  });
+
+  const assembled = new Uint8Array(source.length);
+  for (const [offset, chunk] of written) assembled.set(chunk, offset);
+  assert.deepEqual(assembled, source);
+  assert.ok(pulls > 0, 'the source must be read, not ignored');
+});
+
+test('a source that shrinks mid-upload fails instead of uploading a truncated file', async () => {
+  // A local file edited while it is being sent would otherwise arrive silently wrong.
+  const server = new FakeSftpServer();
+  server.on(PacketType.Write, ({ requestId }) => FakeSftpServer.status(requestId, StatusCode.Ok));
+  const { client } = await connect(server);
+
+  await assert.rejects(
+    () =>
+      client.writeFrom(new Uint8Array([1]), {
+        total: 500,
+        read: (_offset, length) => new Uint8Array(length - 1)
+      }),
+    /expected 500/
+  );
 });

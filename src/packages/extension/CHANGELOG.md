@@ -4,6 +4,18 @@
 
 ### Added
 
+- **Uploading and downloading files.** On the right-click menu in Remote Files, on the view's
+  title bar, and in the command palette.
+  - Neither side ever holds the file in memory, so size is bounded by the disk rather than by
+    the extension. Transfers stay pipelined at 32 chunks in flight.
+  - An upload goes through the same replace sequence a save does -- temporary file, fsync,
+    atomic rename -- so a link that dies mid-upload cannot leave a half-written file where a
+    good one was. A download that fails or is cancelled removes its partial local file.
+  - The notification shows size, rate and an estimate, and can be cancelled.
+  - A transfer that makes no progress at all for 20 seconds is abandoned with an error saying
+    so, rather than waiting on a per-request timeout that names one packet. There is
+    deliberately no minimum-throughput rule: a slow link is not a broken one, and cutting it
+    off would discard work that would have finished.
 - **Creating, renaming and deleting remote files and folders.** The operations had been
   implemented and tested since the rebuild, but nothing in the interface reached them, so a
   file browser could not manage files. They are now on a right-click menu in Remote Files, on
@@ -25,6 +37,11 @@
 
 ### Fixed
 
+- **A short read no longer leaves a hole in the middle of a file.** Servers may legitimately
+  answer a READ with fewer bytes than asked for. The remainder of that range was never
+  requested again, so the gap stayed as zeroes -- invisible in a small text file, corruption
+  in anything large. The test that was meant to cover this only checked the length, which the
+  zero-filled buffer satisfied.
 - **The host list appears without waiting for every host to be probed.** It ran `ssh -G` for
   each configured alias and awaited all of them before drawing a single row -- far worse with
   `Match exec` or canonicalisation, which run commands and resolve DNS. Probing now happens in

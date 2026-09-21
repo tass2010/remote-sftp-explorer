@@ -5,6 +5,7 @@ import {
   type SftpClient
 } from '@remote-sftp-explorer/sftp-protocol';
 import { joinRemotePath, parentRemotePath, remoteBaseName } from './remotePath.ts';
+import type { ContentSource } from '../transfer/fileTransfer.ts';
 import type { Logger } from '../ports.ts';
 
 /** Marker embedded in every temporary and backup name so the sweeper can recognise them. */
@@ -26,7 +27,14 @@ export interface SafeReplaceResult {
 export interface SafeReplaceOptions {
   client: SftpClient;
   path: string;
-  content: Uint8Array;
+  /**
+   * What to write: bytes already in hand, or a source pulled on demand.
+   *
+   * An upload takes the second form. Routing it through this same state machine is what keeps
+   * a failed upload from leaving a half-written file where a good one used to be -- the whole
+   * reason this function exists -- without ever holding the file in memory to get it.
+   */
+  content: Uint8Array | ContentSource;
   /** Permission bits of the file being replaced, so the replacement inherits them. */
   permissions?: number | undefined;
   randomToken: () => string;
@@ -86,10 +94,19 @@ async function writeTemporary(options: SafeReplaceOptions, tempPath: string): Pr
   );
 
   try {
-    await client.writeAll(handle, content, {
-      signal: options.signal,
-      onProgress: options.onProgress
-    });
+    if (content instanceof Uint8Array) {
+      await client.writeAll(handle, content, {
+        signal: options.signal,
+        onProgress: options.onProgress
+      });
+    } else {
+      await client.writeFrom(handle, {
+        total: content.size,
+        read: (offset, length) => content.read(offset, length),
+        signal: options.signal,
+        onProgress: options.onProgress
+      });
+    }
     if (client.capabilities.fsync) {
       // Without this the rename can be durable while the contents are not, which after a
       // server crash leaves a correctly-named empty file.

@@ -22,6 +22,9 @@ export type BrowserMessage =
   // trusting the client about where a write lands.
   | { type: 'createFile' }
   | { type: 'createDirectory' }
+  // Upload targets the listed directory, like the creates; download needs to know which file.
+  | { type: 'upload' }
+  | { type: 'download'; path: string }
   | { type: 'rename'; path: string }
   | { type: 'delete'; path: string }
   // Which row is highlighted, so the palette commands have a target when they are invoked
@@ -34,7 +37,8 @@ const PATHLESS = new Set([
   'navigateParent',
   'clearHistory',
   'createFile',
-  'createDirectory'
+  'createDirectory',
+  'upload'
 ]);
 const WITH_PATH = new Set([
   'navigate',
@@ -43,7 +47,8 @@ const WITH_PATH = new Set([
   'addFavorite',
   'rename',
   'delete',
-  'select'
+  'select',
+  'download'
 ]);
 
 /**

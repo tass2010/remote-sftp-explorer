@@ -30,6 +30,7 @@ import {
 import { FILES_VIEW_ID, FilesWebviewProvider } from './views/filesWebview.ts';
 import { ConnectionStatusBar } from './statusBar.ts';
 import { registerFileOperations } from './commands/fileOperations.ts';
+import { registerFileTransfers } from './commands/fileTransfers.ts';
 import { runWithProgress } from './ui/progress.ts';
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -205,6 +206,9 @@ export function activate(context: vscode.ExtensionContext): void {
   // Creating, renaming and deleting. Registered from their own module because they share a
   // name prompt and a confirmation, none of which the connection commands need.
   registerFileOperations(context, { sessions, files: filesView, fileSystem });
+  // Transfers are separate: they run for minutes rather than one round trip, so they carry
+  // progress, a cancel button and a stall guard that none of the above need.
+  registerFileTransfers(context, { sessions, files: filesView, logger });
 
   register('remoteSftp.clearHistory', async () => {
     const alias = sessions.alias;

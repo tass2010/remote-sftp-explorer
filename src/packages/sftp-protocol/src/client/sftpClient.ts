@@ -79,6 +79,28 @@ export interface WriteStreamOptions {
   onProgress?: ((bytesSoFar: number) => void) | undefined;
 }
 
+/**
+ * Somewhere for bytes to go as they arrive.
+ *
+ * Chunks are delivered with their offset and may arrive out of order, because the window has
+ * many reads in flight at once. A sink writing to a file must therefore position each write
+ * rather than append.
+ */
+export interface ReadToOptions {
+  size: bigint;
+  write(offset: number, chunk: Uint8Array): Promise<void> | void;
+  signal?: AbortLike | undefined;
+  onProgress?: ((bytesSoFar: number) => void) | undefined;
+}
+
+/** Bytes pulled on demand, so an upload never holds the whole file. */
+export interface WriteFromOptions {
+  total: number;
+  read(offset: number, length: number): Promise<Uint8Array> | Uint8Array;
+  signal?: AbortLike | undefined;
+  onProgress?: ((bytesSoFar: number) => void) | undefined;
+}
+
 const DEFAULTS = {
   maxInFlight: 32,
   metadataTimeoutMs: 30_000,
@@ -407,119 +429,63 @@ export class SftpClient {
   }
 
   /**
-   * Read a whole file with a pipelined window of READs.
+   * Wait for local work, but stop waiting when the signal aborts.
    *
-   * Two properties that a naive loop gets wrong:
-   *  - a short read is normal and does NOT signal EOF;
-   *  - EOF on a high-offset slot does not mean lower offsets are done, because those requests
-   *    may still be in flight.
+   * The sink and the source are somebody else's code touching a disk, and a disk can hang --
+   * a disconnected network share, a removed device. Such a read never returns and cannot be
+   * cancelled, so a slot would be held open forever and no amount of aborting the SFTP side
+   * would free it: the transfer would sit there making no progress and refusing to fail,
+   * which is the exact behaviour the stall guard exists to prevent.
+   *
+   * We cannot unstick the operation. What we can do is stop waiting on it.
    */
-  async readFile(path: string, options: ReadFileOptions): Promise<Uint8Array> {
-    const total = Number(options.size);
-    if (!Number.isSafeInteger(total) || total < 0) {
-      throw new SftpProtocolError(`unsupported file size ${options.size}`);
-    }
-    const handle = await this.open(path, OpenFlag.Read, {}, options.signal);
-    const buffer = new Uint8Array(total);
-    let received = 0;
-
-    try {
-      const chunkSize = this.capabilities.readChunkSize();
-      let nextOffset = 0;
-      const active = new Set<Promise<void>>();
-      let failure: unknown;
-
-      const pump = (): void => {
-        while (
-          failure === undefined &&
-          nextOffset < total &&
-          active.size < this.#maxInFlight
-        ) {
-          const offset = nextOffset;
-          const length = Math.min(chunkSize, total - offset);
-          nextOffset += length;
-
-          const task = (async () => {
-            const response = await this.#request(
-              PacketType.Read,
-              (id) => encodeRead(id, handle, BigInt(offset), length),
-              { signal: options.signal, context: `reading ${path}`, transfer: true }
-            );
-            if (response.body.kind === 'status') {
-              // EOF here only means this slot found the end; shorter files simply stop early.
-              if (response.body.status.code === StatusCode.Eof) return;
-              throw new SftpStatusError(response.body.status, `reading ${path}`);
-            }
-            if (response.body.kind !== 'data') {
-              throw new SftpProtocolError(`expected DATA while reading ${path}`);
-            }
-            buffer.set(response.body.data, offset);
-            received += response.body.data.length;
-            options.onProgress?.(received);
-          })();
-
-          const tracked = task
-            .catch((error: unknown) => {
-              failure ??= error;
-            })
-            .finally(() => {
-              active.delete(tracked);
-            });
-          active.add(tracked);
-        }
-      };
-
-      pump();
-      while (active.size > 0) {
-        await Promise.race([...active]);
-        if (failure === undefined) pump();
+  #raceAbort<T>(work: Promise<T> | T, signal?: AbortLike): Promise<T> {
+    if (!(work instanceof Promise) || signal === undefined) return Promise.resolve(work);
+    return new Promise<T>((resolve, reject) => {
+      if (signal.aborted) {
+        reject(new AbortedError());
+        return;
       }
-      if (failure !== undefined) throw failure;
-
-      this.#throwIfAborted(options.signal);
-      return buffer;
-    } finally {
-      // Same reasoning as readDirectory: the bytes are assembled, so making the editor wait
-      // for CLOSE before showing them buys nothing.
-      void this.#closeHandleQuietly(handle);
-    }
+      const onAbort = (): void => reject(new AbortedError());
+      signal.addEventListener('abort', onAbort, { once: true });
+      work.then(
+        (value) => {
+          signal.removeEventListener('abort', onAbort);
+          resolve(value);
+        },
+        (error: unknown) => {
+          signal.removeEventListener('abort', onAbort);
+          reject(error instanceof Error ? error : new Error(String(error)));
+        }
+      );
+    });
   }
 
-  /** Write a whole buffer to an already-open handle, pipelined. */
-  async writeAll(
-    handle: Uint8Array,
-    content: Uint8Array,
-    options: WriteStreamOptions = {}
+  /**
+   * Drive a file transfer as a pipelined window of chunks.
+   *
+   * Reads and writes differ only in what they do with a chunk; the hard parts are identical.
+   * Keep up to `maxInFlight` chunks moving, stop issuing new ones the moment anything fails,
+   * and let the outstanding ones settle before reporting -- abandoning them would leave
+   * responses arriving for requests nobody is waiting for, which is the failure this client
+   * was rebuilt to eliminate.
+   */
+  async #pipeline(
+    total: number,
+    chunkSize: number,
+    work: (offset: number, length: number) => Promise<void>
   ): Promise<void> {
-    const chunkSize = this.capabilities.writeChunkSize();
     let nextOffset = 0;
-    let written = 0;
     const active = new Set<Promise<void>>();
     let failure: unknown;
 
     const pump = (): void => {
-      while (
-        failure === undefined &&
-        nextOffset < content.length &&
-        active.size < this.#maxInFlight
-      ) {
+      while (failure === undefined && nextOffset < total && active.size < this.#maxInFlight) {
         const offset = nextOffset;
-        const end = Math.min(offset + chunkSize, content.length);
-        nextOffset = end;
-        const slice = content.subarray(offset, end);
+        const length = Math.min(chunkSize, total - offset);
+        nextOffset += length;
 
-        const task = (async () => {
-          const response = await this.#request(
-            PacketType.Write,
-            (id) => encodeWrite(id, handle, BigInt(offset), slice),
-            { signal: options.signal, context: 'writing', transfer: true }
-          );
-          assertOk(this.#expectStatus(response, 'writing'), 'writing');
-          written += slice.length;
-          options.onProgress?.(written);
-        })();
-
-        const tracked = task
+        const tracked: Promise<void> = work(offset, length)
           .catch((error: unknown) => {
             failure ??= error;
           })
@@ -536,7 +502,138 @@ export class SftpClient {
       if (failure === undefined) pump();
     }
     if (failure !== undefined) throw failure;
+  }
+
+  /**
+   * Read a file, handing each chunk to a sink rather than assembling it in memory.
+   *
+   * Three properties a naive loop gets wrong:
+   *  - a short read is normal and does NOT signal EOF, so the rest of the range must be
+   *    requested again -- taking the requested length as received is how a download ends up
+   *    with a hole full of zeroes in the middle of it;
+   *  - EOF on a high-offset slot does not mean lower offsets are done, because those requests
+   *    may still be in flight;
+   *  - the sink has to be awaited inside the slot, so that a disk slower than the link stops
+   *    the window refilling instead of queueing chunks in memory without limit.
+   */
+  async readTo(path: string, options: ReadToOptions): Promise<void> {
+    const total = Number(options.size);
+    if (!Number.isSafeInteger(total) || total < 0) {
+      throw new SftpProtocolError(`unsupported file size ${options.size}`);
+    }
+    const handle = await this.open(path, OpenFlag.Read, {}, options.signal);
+    let received = 0;
+
+    try {
+      await this.#pipeline(total, this.capabilities.readChunkSize(), async (offset, length) => {
+        let cursor = offset;
+        let remaining = length;
+
+        while (remaining > 0) {
+          const at = cursor;
+          const want = remaining;
+          const response = await this.#request(
+            PacketType.Read,
+            (id) => encodeRead(id, handle, BigInt(at), want),
+            { signal: options.signal, context: `reading ${path}`, transfer: true }
+          );
+
+          if (response.body.kind === 'status') {
+            // EOF here only means this slot reached the end; shorter files stop early, and
+            // other slots may still have work to do.
+            if (response.body.status.code === StatusCode.Eof) return;
+            throw new SftpStatusError(response.body.status, `reading ${path}`);
+          }
+          if (response.body.kind !== 'data') {
+            throw new SftpProtocolError(`expected DATA while reading ${path}`);
+          }
+
+          const data = response.body.data;
+          if (data.length === 0) {
+            // Neither EOF nor bytes: looping again would spin forever against this server.
+            throw new SftpProtocolError(`empty DATA at offset ${at} while reading ${path}`);
+          }
+
+          await this.#raceAbort(options.write(at, data), options.signal);
+          cursor += data.length;
+          remaining -= data.length;
+          received += data.length;
+          options.onProgress?.(received);
+        }
+      });
+
+      this.#throwIfAborted(options.signal);
+    } finally {
+      // The bytes are already with the sink, so waiting for CLOSE buys nothing.
+      void this.#closeHandleQuietly(handle);
+    }
+  }
+
+  /** Read a whole file into memory. Only for content that is going somewhere that needs it. */
+  async readFile(path: string, options: ReadFileOptions): Promise<Uint8Array> {
+    const total = Number(options.size);
+    if (!Number.isSafeInteger(total) || total < 0) {
+      throw new SftpProtocolError(`unsupported file size ${options.size}`);
+    }
+    const buffer = new Uint8Array(total);
+    await this.readTo(path, {
+      size: options.size,
+      write: (offset, chunk) => {
+        buffer.set(chunk, offset);
+      },
+      signal: options.signal,
+      onProgress: options.onProgress
+    });
+    return buffer;
+  }
+
+  /**
+   * Write to an open handle from a source pulled on demand.
+   *
+   * The source is read inside the slot, so an upload holds at most one window of chunks --
+   * around two megabytes -- however large the file is.
+   */
+  async writeFrom(handle: Uint8Array, options: WriteFromOptions): Promise<void> {
+    let written = 0;
+
+    await this.#pipeline(
+      options.total,
+      this.capabilities.writeChunkSize(),
+      async (offset, length) => {
+        const slice = await this.#raceAbort(options.read(offset, length), options.signal);
+        if (slice.length !== length) {
+          // A short local read means the file changed under us. Writing the truncated slice
+          // would silently upload something other than what was on disk.
+          throw new SftpProtocolError(
+            `the source gave ${slice.length} bytes at offset ${offset}, expected ${length}`
+          );
+        }
+        const response = await this.#request(
+          PacketType.Write,
+          (id) => encodeWrite(id, handle, BigInt(offset), slice),
+          { signal: options.signal, context: 'writing', transfer: true }
+        );
+        assertOk(this.#expectStatus(response, 'writing'), 'writing');
+        written += slice.length;
+        options.onProgress?.(written);
+      }
+    );
+
     this.#throwIfAborted(options.signal);
+  }
+
+  /** Write a whole buffer to an already-open handle, pipelined. */
+  async writeAll(
+    handle: Uint8Array,
+    content: Uint8Array,
+    options: WriteStreamOptions = {}
+  ): Promise<void> {
+    await this.writeFrom(handle, {
+      total: content.length,
+      read: (offset, length) => content.subarray(offset, offset + length),
+      signal: options.signal,
+      onProgress: options.onProgress
+    });
   }
 
   /** Raw extended request, for callers that need an extension we do not wrap. */

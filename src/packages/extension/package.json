@@ -120,6 +120,18 @@
         "command": "remoteSftp.delete",
         "title": "Delete",
         "category": "Remote SFTP"
+      },
+      {
+        "command": "remoteSftp.download",
+        "title": "Download",
+        "icon": "$(cloud-download)",
+        "category": "Remote SFTP"
+      },
+      {
+        "command": "remoteSftp.upload",
+        "title": "Upload",
+        "icon": "$(cloud-upload)",
+        "category": "Remote SFTP"
       }
     ],
     "viewsContainers": {
@@ -183,6 +195,11 @@
           "group": "navigation@2"
         },
         {
+          "command": "remoteSftp.upload",
+          "when": "view == remoteSftp.files && remoteSftp.connected",
+          "group": "navigation@3"
+        },
+        {
           "command": "remoteSftp.refreshHosts",
           "when": "view == remoteSftp.hosts",
           "group": "navigation@1"
@@ -190,12 +207,12 @@
         {
           "command": "remoteSftp.refreshFiles",
           "when": "view == remoteSftp.files && remoteSftp.connected",
-          "group": "navigation@3"
+          "group": "navigation@4"
         },
         {
           "command": "remoteSftp.disconnect",
           "when": "view == remoteSftp.files && remoteSftp.connected",
-          "group": "navigation@4"
+          "group": "navigation@5"
         },
         {
           "command": "remoteSftp.clearHistory",
@@ -218,6 +235,14 @@
         },
         {
           "command": "remoteSftp.delete",
+          "when": "remoteSftp.connected"
+        },
+        {
+          "command": "remoteSftp.download",
+          "when": "remoteSftp.connected"
+        },
+        {
+          "command": "remoteSftp.upload",
           "when": "remoteSftp.connected"
         }
       ]

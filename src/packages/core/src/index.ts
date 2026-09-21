@@ -1,5 +1,6 @@
 export * from './ports.ts';
 export * from './fs/remotePath.ts';
+export * from './transfer/fileTransfer.ts';
 export * from './fs/safeReplace.ts';
 export * from './fs/errorClassification.ts';
 export * from './locks/pathLockRegistry.ts';

@@ -9,7 +9,8 @@ import assert from 'node:assert/strict';
 import { Extension, PacketType } from '@remote-sftp-explorer/sftp-protocol';
 import {
   createControllableClock,
-  FakeSftpServer
+  FakeSftpServer,
+  type ControllableClock
 } from '../../sftp-protocol/test/support/fakeSftpServer.ts';
 import { FakeRemoteFs } from './support/fakeRemoteFs.ts';
 import { FakeSpawner } from './support/fakeSpawner.ts';
@@ -20,6 +21,7 @@ interface Fixture {
   fs: FakeRemoteFs;
   spawner: FakeSpawner;
   server: FakeSftpServer;
+  clock: ControllableClock;
 }
 
 let tokenCounter = 0;
@@ -43,16 +45,17 @@ async function connect(options: { posixRename?: boolean } = {}): Promise<Fixture
     child.onWrite = (chunk) => server.channel.write(chunk);
   };
 
+  const clock = createControllableClock();
   const session = await RemoteSession.connect({
     spawner,
     executable: 'ssh',
     alias: 'example',
     environment: { PATH: '/usr/bin' },
-    clock: createControllableClock(),
+    clock,
     randomToken: () => `tok${tokenCounter++}`
   });
 
-  return { session, fs, spawner, server };
+  return { session, fs, spawner, server, clock };
 }
 
 const text = (value: string): Uint8Array => new TextEncoder().encode(value);
@@ -281,3 +284,144 @@ test('reading does not wait for the handle to be closed', async () => {
 async function settle(times = 8): Promise<void> {
   for (let index = 0; index < times; index += 1) await Promise.resolve();
 }
+
+// ---------------------------------------------------------------------------
+// Whole-file transfers
+// ---------------------------------------------------------------------------
+
+class MemorySink {
+  readonly chunks = new Map<number, Uint8Array>();
+  closed = false;
+  async write(offset: number, chunk: Uint8Array): Promise<void> {
+    this.chunks.set(offset, Uint8Array.from(chunk));
+  }
+  async close(): Promise<void> {
+    this.closed = true;
+  }
+  assemble(length: number): Uint8Array {
+    const out = new Uint8Array(length);
+    for (const [offset, chunk] of this.chunks) out.set(chunk, offset);
+    return out;
+  }
+}
+
+class MemorySource {
+  readonly size: number;
+  closed = false;
+  readonly #bytes: Uint8Array;
+  constructor(bytes: Uint8Array) {
+    this.#bytes = bytes;
+    this.size = bytes.length;
+  }
+  async read(offset: number, length: number): Promise<Uint8Array> {
+    return this.#bytes.subarray(offset, offset + length);
+  }
+  async close(): Promise<void> {
+    this.closed = true;
+  }
+}
+
+test('downloading writes every byte at its own offset and releases the sink', async () => {
+  const { session, fs } = await connect();
+  const content = 'the quick brown fox jumps over the lazy dog';
+  fs.write('/home/dev/notes.txt', content, 0o100644);
+
+  const sink = new MemorySink();
+  const result = await session.download('/home/dev/notes.txt', sink);
+
+  assert.equal(decode(sink.assemble(content.length)), content);
+  assert.equal(result.bytes, content.length);
+  assert.equal(sink.closed, true);
+});
+
+test('the sink is closed even when the download fails', async () => {
+  // A local file left open on a failed download is the worst of both outcomes: incomplete and
+  // still locked.
+  const { session, fs } = await connect();
+  fs.write('/home/dev/notes.txt', 'content', 0o100644);
+  fs.fail({ operation: 'open', match: (path) => path === '/home/dev/notes.txt' });
+
+  const sink = new MemorySink();
+  await assert.rejects(() => session.download('/home/dev/notes.txt', sink));
+  assert.equal(sink.closed, true);
+});
+
+test('a directory is refused before anything is opened', async () => {
+  const { session, fs } = await connect();
+  // The fake answers STAT from its file table, so the directory needs an entry of its own for
+  // the mode bits to be visible at all.
+  fs.write('/home/dev/subdir', '', 0o040755);
+  fs.write('/home/dev/subdir/inner', 'i', 0o100644);
+
+  const sink = new MemorySink();
+  await assert.rejects(() => session.download('/home/dev/subdir', sink), /is a directory/);
+  assert.equal(sink.closed, false, 'nothing was opened, so there is nothing to release');
+});
+
+test('uploading replaces through a temporary file, never truncating the original', async () => {
+  // The whole point on a bad link: an interrupted upload must not be able to leave a
+  // half-written file where a good one was.
+  const { session, fs } = await connect();
+  fs.write('/home/dev/notes.txt', 'the original contents', 0o100644);
+
+  const source = new MemorySource(text('replacement contents'));
+  await session.upload('/home/dev/notes.txt', source);
+
+  assert.equal(fs.read('/home/dev/notes.txt'), 'replacement contents');
+  assert.equal(source.closed, true);
+  // Nothing was ever opened on the destination itself; the writes went to a temporary name.
+  const opened = fs.operations.filter((op) => op.operation === 'open').map((op) => op.path);
+  assert.ok(
+    opened.every((path) => path !== '/home/dev/notes.txt'),
+    `the destination must not be opened for writing, saw ${opened.join(', ')}`
+  );
+  assert.equal(fs.artifacts().length, 0, 'the temporary file is cleaned up');
+});
+
+test('an upload that fails part way leaves the original file intact', async () => {
+  const { session, fs } = await connect();
+  fs.write('/home/dev/notes.txt', 'the original contents', 0o100644);
+  fs.fail({ operation: 'write', match: (path) => path.includes('.remote-sftp-') });
+
+  const source = new MemorySource(text('replacement contents'));
+  await assert.rejects(() => session.upload('/home/dev/notes.txt', source));
+
+  assert.equal(fs.read('/home/dev/notes.txt'), 'the original contents');
+  assert.equal(source.closed, true, 'the local handle is released whatever happened');
+  assert.equal(fs.artifacts().length, 0, 'and the temporary file does not survive the failure');
+});
+
+test('a stalled upload reports the stall and stops', async () => {
+  const { session, fs, clock } = await connect();
+  fs.write('/home/dev/notes.txt', 'original', 0o100644);
+
+  // A local read that never returns: a disconnected network share, a removed device. The SFTP
+  // side is perfectly healthy, so only a guard watching bytes rather than packets notices.
+  const source = {
+    size: 4096,
+    closed: false,
+    started: false,
+    read: (): Promise<Uint8Array> => {
+      source.started = true;
+      return new Promise<Uint8Array>(() => undefined);
+    },
+    close: async (): Promise<void> => {
+      source.closed = true;
+    }
+  };
+
+  const attempt = session.upload('/home/dev/notes.txt', source, { stallMs: 5_000 });
+  const rejected = assert.rejects(attempt, /stopped making progress/);
+
+  // Advancing before the transfer has actually begun would fire nothing -- the write lock and
+  // the temporary-file open both have to complete before the stall timer is armed -- and the
+  // test would then wait for a timer that is set afterwards and never reached.
+  for (let tick = 0; tick < 50 && !source.started; tick += 1) await Promise.resolve();
+  assert.ok(source.started, 'the upload must be under way before the clock is advanced');
+
+  clock.advance(5_000);
+  await rejected;
+
+  assert.equal(source.closed, true, 'the local handle is released even on a stall');
+  assert.equal(fs.read('/home/dev/notes.txt'), 'original', 'and the original is untouched');
+});

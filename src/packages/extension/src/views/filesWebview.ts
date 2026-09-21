@@ -240,6 +240,12 @@ export class FilesWebviewProvider implements vscode.WebviewViewProvider, vscode.
       case 'delete':
         await vscode.commands.executeCommand('remoteSftp.delete', message.path);
         return;
+      case 'upload':
+        await vscode.commands.executeCommand('remoteSftp.upload');
+        return;
+      case 'download':
+        await vscode.commands.executeCommand('remoteSftp.download', message.path);
+        return;
       case 'addFavorite': {
         const entry = this.#entries.find((candidate) => candidate.path === message.path);
         if (entry === undefined || entry.type === 'other' || entry.type === 'symlink') return;
