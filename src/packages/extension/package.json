@@ -2,7 +2,7 @@
   "name": "remote-sftp-explorer",
   "displayName": "Remote SFTP Explorer",
   "description": "Browse and safely edit remote files through your existing Windows OpenSSH configuration.",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "license": "MIT",
@@ -44,8 +44,8 @@
     }
   },
   "dependencies": {
-    "@remote-sftp-explorer/core": "0.3.1",
-    "@remote-sftp-explorer/sftp-protocol": "0.3.1"
+    "@remote-sftp-explorer/core": "0.4.0",
+    "@remote-sftp-explorer/sftp-protocol": "0.4.0"
   },
   "activationEvents": [
     "onView:remoteSftp.hosts",

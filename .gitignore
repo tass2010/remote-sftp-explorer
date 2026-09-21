@@ -11,3 +11,5 @@ src/packages/extension/bin/
 src/native/askpass/target/
 .claude/
 docs/
+# Working notes, not part of what the repository publishes -- same decision as docs/.
+CLAUDE.md
