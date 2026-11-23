@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.4.1
+
+### Changed
+
+- **The path field’s recent-directory list** is drawn by the webview instead of a native
+  `<datalist>`. Opening it shows every visited directory for the host; choosing one navigates
+  immediately. Typing narrows the list. The datalist filtered by the field’s value — always the
+  current path — so it offered only that directory and its children, and a pick still needed
+  Enter.
+- **A directory listing starts with the first row focused** rather than keeping the highlight
+  index from the previous folder.
+- **Download** opens the save dialog under the user’s Downloads folder when it exists, not at the
+  drive root.
+- **Directory history** is recorded only when the path actually changes; refreshes no longer
+  rewrite the entry already at the top of the capped list.
+
+### Fixed
+
+- **Deleting a symlink to a directory removes the link, not its target.** Delete used `stat`,
+  which follows the link, so a recursive delete walked into the pointed-to directory and removed
+  its contents.
+- **Double-clicking a symlink to a directory navigates to the resolved target** instead of
+  handing the link to the editor and failing with “is a directory”. A dangling link reports why
+  and leaves the browser where it was.
+- **“Discard My Changes and Reload” on a save conflict** now clears the baseline and reverts only
+  that document. Previously it cleared every open file’s baseline, so later saves on other tabs
+  skipped conflict detection.
+- **Clear Directory History** with no active connection clears the last host’s history only, or
+  says to connect first. Previously it cleared every host’s history.
+- **`writeFile` honours `create: false` and `overwrite: false`** before asking to update the
+  remote file. Rename’s occupancy check uses the same existence logic so a dropped connection is
+  not read as “free to overwrite”.
+- **Listed symlinks** in `readDirectory` carry the target’s type where it can be resolved, so a
+  link to a directory is expandable in APIs that use the listing.
+
 ## 0.4.0
 
 ### Added
