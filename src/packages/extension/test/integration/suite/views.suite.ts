@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
+import { mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { deepEqual, equal, ok, suite, waitFor } from './harness.ts';
-import { ALIAS, api, connect } from './support.ts';
+import { ALIAS, api, connect, fakeRoot } from './support.ts';
 
 /**
  * The three views, rendered by the real editor.
@@ -81,5 +83,41 @@ export const viewsSuite = suite('views', (test) => {
       `expected inner.txt, saw ${test_.files.entryNames.join(', ')}`
     );
     await test_.files.navigate('/');
+  });
+
+  test('opening a link to a directory goes to where it points', async () => {
+    // Used to be handed to the editor as a file, which failed with "is a directory".
+    const test_ = await connect();
+    mkdirSync(join(fakeRoot(), 'install-dir'), { recursive: true });
+    writeFileSync(join(fakeRoot(), 'install-dir', 'tool.sh'), 'echo');
+    symlinkSync(join(fakeRoot(), 'install-dir'), join(fakeRoot(), 'skill-link'));
+    try {
+      await test_.files.navigate('/');
+      equal(test_.files.entryAt('/skill-link')?.type, 'symlink', 'the listing shows the link');
+
+      await test_.files.openEntry('/skill-link');
+
+      equal(test_.files.currentDirectory, '/install-dir', 'the path bar names the target');
+      ok(
+        test_.files.entryNames.includes('tool.sh'),
+        `expected the target's contents, saw ${test_.files.entryNames.join(', ')}`
+      );
+    } finally {
+      rmSync(join(fakeRoot(), 'skill-link'));
+      rmSync(join(fakeRoot(), 'install-dir'), { recursive: true });
+      await test_.files.navigate('/');
+    }
+  });
+
+  test('opening a dangling link stays put instead of failing elsewhere', async () => {
+    const test_ = await connect();
+    symlinkSync(join(fakeRoot(), 'nowhere'), join(fakeRoot(), 'dangling-link'));
+    try {
+      await test_.files.navigate('/');
+      await test_.files.openEntry('/dangling-link');
+      equal(test_.files.currentDirectory, '/', 'nothing to go to, so the browser does not move');
+    } finally {
+      rmSync(join(fakeRoot(), 'dangling-link'));
+    }
   });
 });

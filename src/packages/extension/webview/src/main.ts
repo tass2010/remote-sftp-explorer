@@ -59,7 +59,7 @@ declare function acquireVsCodeApi(): VsCodeApi;
 const vscode = acquireVsCodeApi();
 
 const pathInput = document.getElementById('path') as HTMLInputElement;
-const recentList = document.getElementById('recent') as HTMLDataListElement;
+const recentList = document.getElementById('recent') as HTMLDivElement;
 const head = document.getElementById('head') as HTMLDivElement;
 const sortBar = document.querySelector('.sortbar') as HTMLDivElement;
 const rowsContainer = document.getElementById('rows') as HTMLDivElement;
@@ -72,6 +72,11 @@ let received: BrowserEntry[] = [];
 /** What is actually on screen, after sorting. Row indices refer to this. */
 let entries: BrowserEntry[] = [];
 let recentHistory: string[] = [];
+/** The paths the open dropdown is showing, in order. Option indices refer to this. */
+let shownRecent: string[] = [];
+let activeRecent = -1;
+/** Where the host says we are, so Escape can put the field back without asking it again. */
+let displayedPath = '';
 let focusedIndex = 0;
 let sort: SortOrder = { key: 'name', direction: 'asc' };
 
@@ -540,6 +545,7 @@ function renderRows(): void {
 function render(state: BrowserState): void {
   received = state.entries;
 
+  displayedPath = state.path;
   // Do not clobber a path the user is part-way through typing.
   if (document.activeElement !== pathInput) {
     pathInput.value = state.path;
@@ -550,15 +556,7 @@ function render(state: BrowserState): void {
 
   renderRows();
 
-  // Recent directories are offered by the path field itself rather than a separate control.
   recentHistory = state.history;
-  const options = document.createDocumentFragment();
-  for (const path of state.history) {
-    const option = document.createElement('option');
-    option.value = path;
-    options.append(option);
-  }
-  recentList.replaceChildren(options);
 
   statusBar.textContent = state.error ?? state.status;
   statusBar.className = `status${state.error !== undefined ? ' error' : ''}${
@@ -572,32 +570,157 @@ function render(state: BrowserState): void {
 
 document.getElementById('up')?.addEventListener('click', () => post({ type: 'navigateParent' }));
 
-pathInput.addEventListener('keydown', (event) => {
-  if (event.key === 'Enter') {
-    post({ type: 'navigate', path: pathInput.value });
-    pathInput.blur();
+// ---------------------------------------------------------------------------
+// Recent directories
+// ---------------------------------------------------------------------------
+
+/**
+ * Show the dropdown.
+ *
+ * Opening it from focus or the arrow key passes an empty filter, so every visited directory is
+ * offered. Filtering by the field's contents at that moment -- which is the current path -- is
+ * exactly what made the native datalist useless: it only ever showed where you already were
+ * and the directories below it. Only text the user has actually typed narrows the list.
+ */
+function openRecent(filter: string): void {
+  const needle = filter.trim();
+  shownRecent =
+    needle === '' ? [...recentHistory] : recentHistory.filter((path) => path.includes(needle));
+  if (shownRecent.length === 0) {
+    closeRecent();
     return;
   }
-  if (event.key === 'Escape') {
-    // Abandon the edit and go back to showing where we actually are.
-    pathInput.blur();
-    post({ type: 'refresh' });
+
+  const fragment = document.createDocumentFragment();
+  shownRecent.forEach((path, index) => {
+    const option = document.createElement('div');
+    option.id = `recent-${index}`;
+    option.className = 'option';
+    option.setAttribute('role', 'option');
+    option.setAttribute('aria-selected', 'false');
+    // A remote path, so text and never markup.
+    option.textContent = path;
+    option.title = path;
+    // Keep focus in the field: a blur would close the list before the click arrived.
+    option.addEventListener('pointerdown', (event) => event.preventDefault());
+    option.addEventListener('click', () => chooseRecent(path));
+    fragment.append(option);
+  });
+  recentList.replaceChildren(fragment);
+  activeRecent = -1;
+  pathInput.removeAttribute('aria-activedescendant');
+
+  // Fixed and placed from the field's box, like the context menu, so the grid scrolling or
+  // overflowing underneath cannot clip it.
+  const bounds = pathInput.getBoundingClientRect();
+  recentList.style.left = `${bounds.left}px`;
+  recentList.style.top = `${bounds.bottom + 1}px`;
+  recentList.style.width = `${bounds.width}px`;
+  recentList.hidden = false;
+  pathInput.setAttribute('aria-expanded', 'true');
+}
+
+function closeRecent(): void {
+  if (recentList.hidden) return;
+  recentList.hidden = true;
+  recentList.replaceChildren();
+  shownRecent = [];
+  activeRecent = -1;
+  pathInput.setAttribute('aria-expanded', 'false');
+  pathInput.removeAttribute('aria-activedescendant');
+}
+
+function highlightRecent(index: number): void {
+  if (shownRecent.length === 0) return;
+  activeRecent = (index + shownRecent.length) % shownRecent.length;
+  const options = recentList.querySelectorAll<HTMLDivElement>('[role="option"]');
+  options.forEach((option, position) => {
+    option.setAttribute('aria-selected', String(position === activeRecent));
+  });
+  const active = options[activeRecent];
+  if (active !== undefined) {
+    // Focus stays in the field; this is how a screen reader learns which option is current.
+    pathInput.setAttribute('aria-activedescendant', active.id);
+    active.scrollIntoView({ block: 'nearest' });
+  }
+}
+
+/** Picking a recent directory is the whole action: no Enter afterwards. */
+function chooseRecent(path: string): void {
+  closeRecent();
+  pathInput.value = path;
+  post({ type: 'navigateHistory', path });
+  pathInput.blur();
+}
+
+pathInput.addEventListener('focus', () => openRecent(''));
+
+// A click on a field that already has focus fires no focus event, so reopen from here after
+// Escape or a pick has closed the list.
+pathInput.addEventListener('click', () => {
+  if (recentList.hidden) openRecent('');
+});
+
+pathInput.addEventListener('input', () => openRecent(pathInput.value));
+
+pathInput.addEventListener('keydown', (event) => {
+  const open = !recentList.hidden;
+  switch (event.key) {
+    case 'ArrowDown':
+      event.preventDefault();
+      if (open) highlightRecent(activeRecent + 1);
+      else openRecent('');
+      return;
+    case 'ArrowUp':
+      if (!open) return;
+      event.preventDefault();
+      highlightRecent(activeRecent < 0 ? shownRecent.length - 1 : activeRecent - 1);
+      return;
+    case 'Enter': {
+      event.preventDefault();
+      const picked = open && activeRecent >= 0 ? shownRecent[activeRecent] : undefined;
+      if (picked !== undefined) {
+        chooseRecent(picked);
+        return;
+      }
+      closeRecent();
+      post({ type: 'navigate', path: pathInput.value });
+      pathInput.blur();
+      return;
+    }
+    case 'Escape':
+      event.preventDefault();
+      // First Escape closes the list; the next abandons the edit. Restoring the field locally
+      // costs nothing, where asking the host to refresh re-listed the directory over the wire.
+      if (open) {
+        closeRecent();
+        return;
+      }
+      pathInput.value = displayedPath;
+      pathInput.blur();
+      return;
+    case 'Tab':
+      closeRecent();
+      return;
+    default:
   }
 });
 
-pathInput.addEventListener('input', (event) => {
-  // Picking from the dropdown navigates immediately; typing does not. Chromium reports a
-  // datalist selection as `insertReplacementText`, which distinguishes the two reliably --
-  // matching the typed text against the history list instead would navigate mid-keystroke
-  // whenever someone typed a path they had visited before.
-  const inputType = (event as InputEvent).inputType;
-  if (inputType === 'insertReplacementText' && recentHistory.includes(pathInput.value)) {
-    post({ type: 'navigateHistory', path: pathInput.value });
-    pathInput.blur();
-  }
+pathInput.addEventListener('blur', () => {
+  closeRecent();
+  showPathTail();
 });
 
-pathInput.addEventListener('blur', () => showPathTail());
+// Positioned in viewport coordinates, so it would be left behind by either of these. Scrolling
+// inside the list itself is how a long history is browsed, and must not close it.
+document.addEventListener(
+  'scroll',
+  (event) => {
+    if (event.target !== recentList) closeRecent();
+  },
+  true
+);
+window.addEventListener('resize', () => closeRecent());
 
 /**
  * Right-clicking below the last row targets the directory rather than an entry.

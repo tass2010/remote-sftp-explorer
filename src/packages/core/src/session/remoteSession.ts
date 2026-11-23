@@ -167,6 +167,11 @@ export class RemoteSession {
     throw new Error(`${path} kept changing while it was being read. Open it again.`);
   }
 
+  /** The canonical absolute path, with every symlink along the way resolved by the server. */
+  async realpath(target: string, signal?: AbortSignal): Promise<string> {
+    return normalizeRemotePath(await this.#client.realpath(normalizeRemotePath(target), signal));
+  }
+
   async readlink(target: string, signal?: AbortSignal): Promise<string> {
     return this.#client.readlink(normalizeRemotePath(target), signal);
   }

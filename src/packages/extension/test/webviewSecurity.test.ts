@@ -178,12 +178,30 @@ test('the row tooltip carries the modified time, not the path', () => {
   );
 });
 
-test('the path field offers recent directories through its own dropdown', () => {
+test('the path field offers recent directories through a listbox it controls', () => {
   const html = render();
-  assert.match(html, /<input id="path"[^>]*list="recent"/u);
-  assert.match(html, /<datalist id="recent">/u);
+  const field = /<input id="path"[^>]*>/u.exec(html)?.[0] ?? '';
+  assert.match(field, /role="combobox"/u);
+  assert.match(field, /aria-controls="recent"/u);
+  assert.match(field, /aria-expanded="false"/u);
   // Browser autocomplete would otherwise compete with our own suggestions.
-  assert.match(html, /<input id="path"[^>]*autocomplete="off"/u);
+  assert.match(field, /autocomplete="off"/u);
+  assert.match(html, /<div id="recent"[^>]*role="listbox"[^>]*hidden>/u);
+  // A datalist filters by the field's value, which is always the current path, so it only
+  // ever offered that directory and its children.
+  assert.ok(!html.includes('<datalist'), 'the native datalist must not come back');
+  assert.ok(!/\blist="/u.test(field));
+});
+
+test('picking a recent directory navigates without waiting for Enter', () => {
+  const client = readFileSync(
+    path.join(extensionRoot, 'webview', 'src', 'main.ts'),
+    'utf8'
+  );
+  const choose = /function chooseRecent[\s\S]*?\n\}/u.exec(client)?.[0] ?? '';
+  assert.match(choose, /type: 'navigateHistory'/u);
+  // Opening from focus must not filter by the current path, or the old behaviour returns.
+  assert.match(client, /addEventListener\('focus', \(\) => openRecent\(''\)\)/u);
 });
 
 test('the built client contains no innerHTML assignment', () => {

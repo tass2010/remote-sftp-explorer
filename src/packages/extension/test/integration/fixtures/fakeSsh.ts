@@ -173,8 +173,20 @@ async function dispatch(type: number, requestId: number, reader: PacketReader): 
   switch (type) {
     case PacketType.Realpath: {
       const target = reader.string();
-      const resolved = target === '.' ? '/' : path.posix.normalize(target);
-      names(requestId, [{ filename: resolved, attributes: {} }]);
+      if (target === '.') {
+        names(requestId, [{ filename: '/', attributes: {} }]);
+        return;
+      }
+      // Resolved on disk, as OpenSSH does: following a link to a directory depends on REALPATH
+      // answering with where the link leads, not with the link's own path.
+      try {
+        const base = await fsp.realpath(root as string);
+        const real = await fsp.realpath(local(target));
+        const inside = path.relative(base, real).split(path.sep).join('/');
+        names(requestId, [{ filename: `/${inside}`, attributes: {} }]);
+      } catch (error) {
+        fail(requestId, error);
+      }
       return;
     }
 

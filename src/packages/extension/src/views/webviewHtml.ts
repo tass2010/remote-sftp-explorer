@@ -54,8 +54,8 @@ ${options.style}
      changes length. -->
 <div class="toolbar">
   <input id="path" type="text" spellcheck="false" autocomplete="off"
-         list="recent" aria-label="Remote path" placeholder="Not connected">
-  <datalist id="recent"></datalist>
+         role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="recent"
+         aria-label="Remote path" placeholder="Not connected">
   <button id="up" type="button" title="Parent directory" aria-label="Parent directory">
     <!-- Inline SVG rather than a text arrow or an icon font: it renders identically on every
          platform, inherits the theme colour through currentColor, and needs no font-src in
@@ -65,6 +65,11 @@ ${options.style}
     </svg>
   </button>
 </div>
+<!-- Recent directories. Drawn by the client rather than a native datalist: a datalist filters
+     its options by whatever the field holds, and the field always holds the current path, so
+     it only ever offered that directory and the ones beneath it. Options are written with
+     textContent, because every one of them is a remote path. -->
+<div id="recent" class="recent" role="listbox" aria-label="Recent directories" hidden></div>
 <div id="status" class="status" role="status" aria-live="polite"></div>
 <!-- Sorting is a toolbar rather than clickable column headers, because the key the user most
      often wants to sort by -- modified time -- no longer has a column to click. -->

@@ -155,6 +155,24 @@ export class FilesWebviewProvider implements vscode.WebviewViewProvider, vscode.
     this.#post();
   }
 
+  /** What a double-click or Enter on a row does: enter a directory, otherwise open the file. */
+  async openEntry(path: string): Promise<void> {
+    const alias = this.#options.sessions.alias;
+    if (alias === undefined) return;
+    const entry = this.#entries.find((candidate) => candidate.path === path);
+    if (entry?.type === 'directory') {
+      await this.navigate(path);
+      return;
+    }
+    if (entry?.type === 'symlink' && (await this.#followLink(alias, entry.path))) return;
+    // preview:false opens a real tab. The default preview tab is reused by the next file
+    // opened, so double-clicking a second file would replace the first rather than sit
+    // beside it -- which is not what opening two files is meant to do.
+    await vscode.commands.executeCommand('vscode.open', remoteUri(alias, path), {
+      preview: false
+    });
+  }
+
   /**
    * Re-read the current directory.
    *
@@ -199,22 +217,9 @@ export class FilesWebviewProvider implements vscode.WebviewViewProvider, vscode.
         }
         return;
       }
-      case 'openEntry': {
-        const alias = this.#options.sessions.alias;
-        if (alias === undefined) return;
-        const entry = this.#entries.find((candidate) => candidate.path === message.path);
-        if (entry?.type === 'directory') {
-          await this.navigate(message.path);
-          return;
-        }
-        // preview:false opens a real tab. The default preview tab is reused by the next file
-        // opened, so double-clicking a second file would replace the first rather than sit
-        // beside it -- which is not what opening two files is meant to do.
-        await vscode.commands.executeCommand('vscode.open', remoteUri(alias, message.path), {
-          preview: false
-        });
+      case 'openEntry':
+        await this.openEntry(message.path);
         return;
-      }
       case 'clearHistory': {
         const alias = this.#options.sessions.alias;
         if (alias !== undefined) await this.#options.history.clear(alias);
@@ -259,6 +264,32 @@ export class FilesWebviewProvider implements vscode.WebviewViewProvider, vscode.
       default:
         return;
     }
+  }
+
+  /**
+   * Go to where a link to a directory points. False when the link is to a file, so the caller
+   * opens it like any other file.
+   *
+   * The resolved path is navigated to, not the link's own path: a link usually exists to reach
+   * somewhere else -- an install directory, a shared mount -- and the path bar should then say
+   * where that is. Browsing "through" the link would also leave the parent button leading back
+   * into the link's directory rather than the target's.
+   */
+  async #followLink(alias: string, path: string): Promise<boolean> {
+    let target: string;
+    try {
+      const session = await this.#options.sessions.require(alias);
+      if ((await session.stat(path)).type !== 'directory') return false;
+      target = await session.realpath(path);
+    } catch (error) {
+      // A dangling link is the usual cause. Opening it as a file would only fail again, less
+      // clearly, so say what happened here instead.
+      this.#error = `Cannot follow ${path}: ${describe(error)}`;
+      this.#post();
+      return true;
+    }
+    await this.navigate(target);
+    return true;
   }
 
   #post(): void {
