@@ -131,7 +131,7 @@ export class RemoteFileSystemProvider implements vscode.FileSystemProvider, vsco
         () =>
           session.writeFile(path, content, {
             expected: known?.baseline,
-            onConflict: (current) => this.#askAboutConflict(path, current)
+            onConflict: (current) => this.#askAboutConflict(uri, path, current)
           })
       );
 
@@ -167,7 +167,9 @@ export class RemoteFileSystemProvider implements vscode.FileSystemProvider, vsco
     return this.#guard(uri, async () => {
       const session = await this.#sessions.require();
       const path = remotePathOf(uri);
-      const entry = await session.stat(path);
+      // lstat, not stat: stat follows a link to a directory and reports the directory, and a
+      // recursive delete would then empty the target rather than remove the link.
+      const entry = await session.lstat(path);
 
       if (entry.type === 'directory') {
         if (!options.recursive) {
@@ -242,7 +244,11 @@ export class RemoteFileSystemProvider implements vscode.FileSystemProvider, vsco
     await session.removeDirectory(path);
   }
 
-  async #askAboutConflict(path: string, current: RemoteBaseline): Promise<boolean> {
+  async #askAboutConflict(
+    uri: vscode.Uri,
+    path: string,
+    current: RemoteBaseline
+  ): Promise<boolean> {
     const choice = await vscode.window.showWarningMessage(
       `${path} changed on the server since you opened it.`,
       {
@@ -256,12 +262,30 @@ export class RemoteFileSystemProvider implements vscode.FileSystemProvider, vsco
 
     if (choice === 'Overwrite Remote') return true;
     if (choice === 'Discard My Changes and Reload') {
-      // Dropping the cached baseline makes the next open re-read from the server.
-      this.#documents.clear();
-      void vscode.commands.executeCommand('workbench.action.files.revert');
+      // This document only. Clearing every baseline left the other open files with no
+      // `expected` to compare against, so their next save skipped conflict detection and
+      // could silently overwrite someone else's change.
+      this.#documents.delete(uri.toString());
+      // Not awaited: the save that asked is still holding this path's write lock.
+      void this.#reload(uri);
       return false;
     }
     return false;
+  }
+
+  /**
+   * Revert one document to what the server has.
+   *
+   * The revert command acts on the active editor, which during Save All need not be the file
+   * that conflicted, so the right document is brought forward first.
+   */
+  async #reload(uri: vscode.Uri): Promise<void> {
+    try {
+      await vscode.window.showTextDocument(uri, { preview: false });
+      await vscode.commands.executeCommand('workbench.action.files.revert');
+    } catch (error) {
+      this.#logger.warn(`Could not reload ${uri.path} from the server.`, error);
+    }
   }
 
   #fireParentChanged(uri: vscode.Uri, path: string): void {

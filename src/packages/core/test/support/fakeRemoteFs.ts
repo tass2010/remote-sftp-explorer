@@ -40,6 +40,8 @@ export interface FailureRule {
 export class FakeRemoteFs {
   readonly files = new Map<string, Uint8Array>();
   readonly permissions = new Map<string, number>();
+  /** Symlink path to target path. STAT follows these; LSTAT reports the link itself. */
+  readonly links = new Map<string, string>();
   readonly operations: Array<{ operation: Operation; path: string; target?: string }> = [];
 
   #rules: FailureRule[] = [];
@@ -218,19 +220,36 @@ export class FakeRemoteFs {
       );
     });
 
+    server.on(PacketType.Lstat, ({ requestId, reader }) => {
+      const path = reader.string();
+      if (this.links.has(path)) {
+        return FakeSftpServer.attrs(requestId, {
+          size: 0n,
+          permissions: 0o120777,
+          atime: 900,
+          mtime: 1000
+        });
+      }
+      return this.#statAttrs(requestId, path);
+    });
+
     server.on(PacketType.Stat, ({ requestId, reader }) => {
       const path = reader.string();
-      const bytes = this.files.get(path);
-      if (bytes === undefined) {
-        return FakeSftpServer.status(requestId, StatusCode.NoSuchFile, 'missing');
-      }
-      return FakeSftpServer.attrs(requestId, {
-        size: BigInt(bytes.length),
-        permissions: this.permissions.get(path) ?? 0o100644,
-        // v3 couples atime and mtime under one flag, so both must be present.
-        atime: 900,
-        mtime: 1000
-      });
+      return this.#statAttrs(requestId, this.links.get(path) ?? path);
+    });
+  }
+
+  #statAttrs(requestId: number, path: string): Uint8Array {
+    const bytes = this.files.get(path);
+    if (bytes === undefined) {
+      return FakeSftpServer.status(requestId, StatusCode.NoSuchFile, 'missing');
+    }
+    return FakeSftpServer.attrs(requestId, {
+      size: BigInt(bytes.length),
+      permissions: this.permissions.get(path) ?? 0o100644,
+      // v3 couples atime and mtime under one flag, so both must be present.
+      atime: 900,
+      mtime: 1000
     });
   }
 

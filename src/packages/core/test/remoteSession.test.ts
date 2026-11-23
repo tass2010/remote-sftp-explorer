@@ -426,6 +426,30 @@ test('a stalled upload reports the stall and stops', async () => {
   assert.equal(fs.read('/home/dev/notes.txt'), 'original', 'and the original is untouched');
 });
 
+test('stat follows a symlink to a directory, lstat reports the link itself', async () => {
+  // Deleting decides what it is about to destroy from this answer. Following the link there is
+  // how a recursive delete of a link ends up emptying the directory it points at.
+  const { session, fs } = await connect();
+  fs.files.set('/home/dev/real', new Uint8Array(0));
+  fs.permissions.set('/home/dev/real', 0o040755);
+  fs.links.set('/home/dev/link', '/home/dev/real');
+
+  assert.equal((await session.stat('/home/dev/link')).type, 'directory');
+  const link = await session.lstat('/home/dev/link');
+  assert.equal(link.type, 'symlink');
+  assert.equal(link.path, '/home/dev/link');
+  assert.equal(link.name, 'link');
+});
+
+test('lstat of an ordinary file reports the file', async () => {
+  const { session, fs } = await connect();
+  fs.write('/home/dev/plain.txt', 'abc', 0o100644);
+
+  const entry = await session.lstat('/home/dev/plain.txt');
+  assert.equal(entry.type, 'file');
+  assert.equal(entry.size, 3n);
+});
+
 test('renaming within a directory completes instead of deadlocking on its own lock', async () => {
   // rename takes the source lock and then, nested inside it, the destination lock. Both cover
   // the same parent directory, so the inner acquisition waits for a key the outer one is

@@ -108,17 +108,22 @@ export class RemoteSession {
     return entries.map((entry) => toRemoteEntry(path, entry)).sort(compareEntries);
   }
 
+  /** Follows symlinks: a link to a directory reports as a directory. */
   async stat(target: string, signal?: AbortSignal): Promise<RemoteEntry> {
     const path = normalizeRemotePath(target);
-    const attributes = await this.#client.stat(path, signal);
-    return {
-      name: path === '/' ? '/' : path.slice(path.lastIndexOf('/') + 1),
-      path,
-      type: entryTypeOf(attributes),
-      size: attributes.size ?? 0n,
-      mtime: attributes.mtime,
-      permissions: attributes.permissions
-    };
+    return toStatEntry(path, await this.#client.stat(path, signal));
+  }
+
+  /**
+   * Does not follow symlinks: a link reports as `symlink`, whatever it points at.
+   *
+   * Anything about to destroy an entry must ask this rather than `stat`. Asking `stat` made a
+   * link to a directory look like the directory itself, which is one recursive flag away from
+   * deleting the target's contents instead of the link.
+   */
+  async lstat(target: string, signal?: AbortSignal): Promise<RemoteEntry> {
+    const path = normalizeRemotePath(target);
+    return toStatEntry(path, await this.#client.lstat(path, signal));
   }
 
   async baseline(target: string, signal?: AbortSignal): Promise<RemoteBaseline> {
@@ -411,6 +416,17 @@ function entryTypeOf(attributes: FileAttributes): RemoteEntryType {
     default:
       return 'other';
   }
+}
+
+function toStatEntry(path: string, attributes: FileAttributes): RemoteEntry {
+  return {
+    name: path === '/' ? '/' : path.slice(path.lastIndexOf('/') + 1),
+    path,
+    type: entryTypeOf(attributes),
+    size: attributes.size ?? 0n,
+    mtime: attributes.mtime,
+    permissions: attributes.permissions
+  };
 }
 
 function toRemoteEntry(directory: string, entry: DirectoryEntry): RemoteEntry {

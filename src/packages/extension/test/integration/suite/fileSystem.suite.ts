@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { equal, ok, rejects, suite } from './harness.ts';
 import { ALIAS, connect, fakeRoot, remoteUri } from './support.ts';
@@ -98,6 +98,24 @@ export const fileSystemSuite = suite('file system provider', (test) => {
 
     await vscode.workspace.fs.delete(remoteUri(ALIAS, '/tree'), { recursive: true });
     equal(existsSync(onDisk('tree')), false, 'the whole tree must go');
+  });
+
+  test('deleting a link to a directory removes the link and never the contents', async () => {
+    // recursive:true is the dangerous case: the provider used to stat the path, which follows
+    // the link, and then walked into the target deleting everything it found there.
+    await connect();
+    mkdirSync(onDisk('link-target'), { recursive: true });
+    writeFileSync(onDisk('link-target/keep.txt'), 'keep');
+    symlinkSync(onDisk('link-target'), onDisk('dir-link'));
+
+    await vscode.workspace.fs.delete(remoteUri(ALIAS, '/dir-link'), { recursive: true });
+
+    equal(existsSync(onDisk('dir-link')), false, 'the link itself must be gone');
+    equal(
+      readFileSync(onDisk('link-target/keep.txt'), 'utf8'),
+      'keep',
+      'what it pointed at must be untouched'
+    );
   });
 
   test('renaming moves the file and leaves nothing behind', async () => {
