@@ -51,13 +51,23 @@ export const viewsSuite = suite('views', (test) => {
     const entry = test_.files.entryAt('/notes.txt');
     ok(entry !== undefined, 'the fixture file must be listed before it can be favourited');
 
-    // Going through the same callback the webview uses, rather than the store directly.
-    await vscode.commands.executeCommand('remoteSftp.addFavorite');
+    // The same entry point the context menu's message reaches. Invoking the palette command
+    // instead, as this test once did, only shows a hint and saves nothing -- so the test passed
+    // with nothing in the tree at all.
+    test_.files.addFavorite('/notes.txt');
+    await waitFor('the favourite to appear', async () =>
+      (await test_.favorites.getChildren()).some((item) => item.favorite.path === '/notes.txt')
+    );
     const before = await test_.favorites.getChildren();
+    const saved = before.find((item) => item.favorite.path === '/notes.txt');
+    equal(saved?.favorite.alias, ALIAS, 'scoped to the host it was saved from');
+    equal(saved?.favorite.type, 'file', 'with its type');
 
+    test_.files.addFavorite('/notes.txt');
     test_.favorites.refresh();
+    await new Promise((resolve) => setTimeout(resolve, 100));
     const after = await test_.favorites.getChildren();
-    equal(after.length, before.length, 'refreshing must not duplicate rows');
+    equal(after.length, before.length, 'saving again or refreshing must not duplicate rows');
   });
 
   test('the files view resolves and reflects the remote directory', async () => {

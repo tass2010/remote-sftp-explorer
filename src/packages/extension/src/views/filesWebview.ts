@@ -132,10 +132,13 @@ export class FilesWebviewProvider implements vscode.WebviewViewProvider, vscode.
       const entries = await active.list(path);
       const rows = entries.map(toBrowserEntry);
       this.#cache.set(cacheKey(alias, path), rows);
+      const moved = path !== this.#currentPath;
       this.#entries = rows;
       this.#currentPath = path;
       this.#offline = false;
-      await this.#options.history.record(alias, path);
+      // Only a move is a visit. A refresh would record the entry already at the top, which
+      // changes nothing but still rewrites global state every time the panel is shown.
+      if (moved) await this.#options.history.record(alias, path);
     } catch (error) {
       // Falling back to cache keeps the panel useful while disconnected, but the user is told
       // that is what happened rather than being shown stale data as if it were live.
@@ -153,6 +156,13 @@ export class FilesWebviewProvider implements vscode.WebviewViewProvider, vscode.
       }
     }
     this.#post();
+  }
+
+  /** Save a listed entry as a favourite. Only real files and directories qualify. */
+  addFavorite(path: string): void {
+    const entry = this.#entries.find((candidate) => candidate.path === path);
+    if (entry === undefined || entry.type === 'other' || entry.type === 'symlink') return;
+    this.#options.onAddFavorite({ path: entry.path, type: entry.type, name: entry.name });
   }
 
   /** What a double-click or Enter on a row does: enter a directory, otherwise open the file. */
@@ -251,16 +261,9 @@ export class FilesWebviewProvider implements vscode.WebviewViewProvider, vscode.
       case 'download':
         await vscode.commands.executeCommand('remoteSftp.download', message.path);
         return;
-      case 'addFavorite': {
-        const entry = this.#entries.find((candidate) => candidate.path === message.path);
-        if (entry === undefined || entry.type === 'other' || entry.type === 'symlink') return;
-        this.#options.onAddFavorite({
-          path: entry.path,
-          type: entry.type,
-          name: entry.name
-        });
+      case 'addFavorite':
+        this.addFavorite(message.path);
         return;
-      }
       default:
         return;
     }

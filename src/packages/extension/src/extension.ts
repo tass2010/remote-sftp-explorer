@@ -268,7 +268,14 @@ export function activate(context: vscode.ExtensionContext): TestApi | undefined 
   registerFileTransfers(context, { sessions, files: filesView, logger });
 
   register('remoteSftp.clearHistory', async () => {
-    const alias = sessions.alias;
+    // The last host we knew of, so a dropped connection still clears the right one. With no
+    // host at all, do nothing: clear(undefined) means every host's history, which is not what
+    // a button in one host's panel offers to do.
+    const alias = sessions.alias ?? state.alias;
+    if (alias === undefined) {
+      void vscode.window.showInformationMessage('Connect to a host to clear its directory history.');
+      return;
+    }
     await history.clear(alias);
     await filesView.refresh();
   });

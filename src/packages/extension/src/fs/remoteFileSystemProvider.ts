@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import {
+  classifyRemoteError,
   parentRemotePath,
   type Logger,
   type RemoteBaseline,
@@ -55,7 +56,21 @@ export class RemoteFileSystemProvider implements vscode.FileSystemProvider, vsco
     return this.#guard(uri, async () => {
       const session = await this.#sessions.require();
       const entries = await session.list(remotePathOf(uri));
-      return entries.map((entry) => [entry.name, toFileType(entry.type)] as [string, vscode.FileType]);
+      return Promise.all(
+        entries.map(async (entry): Promise<[string, vscode.FileType]> => {
+          if (entry.type !== 'symlink') return [entry.name, toFileType(entry.type)];
+          // VS Code expects a link to carry its target's type alongside the link bit; reporting
+          // every link as a file made a link to a directory unexpandable. One STAT per link,
+          // and only for links, which are rare enough in a listing for that to be cheap.
+          try {
+            const target = await session.stat(entry.path);
+            return [entry.name, vscode.FileType.SymbolicLink | toFileType(target.type)];
+          } catch {
+            // Dangling: there is nothing behind the link to describe.
+            return [entry.name, vscode.FileType.SymbolicLink | vscode.FileType.Unknown];
+          }
+        })
+      );
     });
   }
 
@@ -107,8 +122,13 @@ export class RemoteFileSystemProvider implements vscode.FileSystemProvider, vsco
       const path = remotePathOf(uri);
       const known = this.#documents.get(uri.toString());
 
-      if (!options.overwrite && known !== undefined) {
-        throw vscode.FileSystemError.FileExists(uri);
+      // The contract VS Code relies on, checked before the user is asked anything. An ordinary
+      // save passes create and overwrite both true, so this costs a round trip only when a
+      // caller actually asked for one of the two refusals.
+      if (!options.create || !options.overwrite) {
+        const exists = await this.#exists(session, path);
+        if (!exists && !options.create) throw vscode.FileSystemError.FileNotFound(uri);
+        if (exists && !options.overwrite) throw vscode.FileSystemError.FileExists(uri);
       }
 
       // Every save is confirmed. Declining throws, which leaves the editor dirty -- VS Code's
@@ -202,13 +222,9 @@ export class RemoteFileSystemProvider implements vscode.FileSystemProvider, vsco
         // The gap between the check and the rename cannot be closed from here; a check with a
         // gap still beats no check, and on servers without the extension plain v3 RENAME
         // refuses on its own.
-        let occupied = true;
-        try {
-          await session.stat(destination);
-        } catch {
-          occupied = false;
+        if (await this.#exists(session, destination)) {
+          throw vscode.FileSystemError.FileExists(newUri);
         }
-        if (occupied) throw vscode.FileSystemError.FileExists(newUri);
       }
 
       await session.rename(remotePathOf(oldUri), destination);
@@ -218,6 +234,20 @@ export class RemoteFileSystemProvider implements vscode.FileSystemProvider, vsco
         { type: vscode.FileChangeType.Created, uri: newUri }
       ]);
     });
+  }
+
+  /** Only "no such file" means absent; a dropped connection must not read as permission to create. */
+  async #exists(
+    session: Awaited<ReturnType<SessionManager['require']>>,
+    path: string
+  ): Promise<boolean> {
+    try {
+      await session.lstat(path);
+      return true;
+    } catch (error) {
+      if (classifyRemoteError(error).kind === 'not-found') return false;
+      throw error;
+    }
   }
 
   /** Forget a document's cached baseline when its editor closes. */

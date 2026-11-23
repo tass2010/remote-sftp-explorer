@@ -545,6 +545,9 @@ function renderRows(): void {
 function render(state: BrowserState): void {
   received = state.entries;
 
+  // A different directory starts at its first row. Keeping the old index left focus on some
+  // arbitrary row partway down a listing that has nothing to do with the previous one.
+  if (state.path !== displayedPath) focusedIndex = 0;
   displayedPath = state.path;
   // Do not clobber a path the user is part-way through typing.
   if (document.activeElement !== pathInput) {

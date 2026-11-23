@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
-import { basename } from 'node:path';
+import { basename, join } from 'node:path';
+import { homedir } from 'node:os';
+import { existsSync } from 'node:fs';
 import { unlink } from 'node:fs/promises';
 import {
   describeProgress,
@@ -31,6 +33,17 @@ export interface FileTransferDependencies {
   sessions: SessionManager;
   files: FilesWebviewProvider;
   logger: Logger;
+}
+
+/**
+ * Where the save dialog starts.
+ *
+ * A bare file name is a relative path, and `Uri.file` resolves it against the root, so the
+ * dialog used to open at the top of the drive -- the one place nobody keeps downloads.
+ */
+function defaultDownloadDirectory(): string {
+  const downloads = join(homedir(), 'Downloads');
+  return existsSync(downloads) ? downloads : homedir();
 }
 
 export function registerFileTransfers(
@@ -83,7 +96,7 @@ export function registerFileTransfers(
     }
 
     const destination = await vscode.window.showSaveDialog({
-      defaultUri: vscode.Uri.file(entry.name),
+      defaultUri: vscode.Uri.file(join(defaultDownloadDirectory(), entry.name)),
       title: `Save ${entry.name}`,
       saveLabel: 'Download'
     });

@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { readFileSync, writeFileSync, mkdirSync, existsSync, symlinkSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { equal, ok, rejects, suite } from './harness.ts';
 import { ALIAS, connect, fakeRoot, remoteUri } from './support.ts';
@@ -44,6 +44,30 @@ export const fileSystemSuite = suite('file system provider', (test) => {
     equal(stat.type, vscode.FileType.Directory, 'the type bits must survive the round trip');
   });
 
+  test('a listed link carries the type of what it points at', async () => {
+    await connect();
+    mkdirSync(onDisk('typed-target'), { recursive: true });
+    symlinkSync(onDisk('typed-target'), onDisk('typed-link'));
+    symlinkSync(onDisk('gone'), onDisk('typed-dangling'));
+    try {
+      const entries = new Map(await vscode.workspace.fs.readDirectory(remoteUri(ALIAS, '/')));
+      equal(
+        entries.get('typed-link'),
+        vscode.FileType.SymbolicLink | vscode.FileType.Directory,
+        'a link to a directory must be expandable as one'
+      );
+      equal(
+        entries.get('typed-dangling'),
+        vscode.FileType.SymbolicLink | vscode.FileType.Unknown,
+        'a dangling link has nothing behind it to describe'
+      );
+    } finally {
+      rmSync(onDisk('typed-link'));
+      rmSync(onDisk('typed-dangling'));
+      rmSync(onDisk('typed-target'), { recursive: true });
+    }
+  });
+
   test('a save that is not confirmed leaves the server untouched', async () => {
     // Every save asks first. VS Code refuses to show dialogs during a test run, which is
     // exactly the declined path -- so this tests the confirmation contract rather than
@@ -60,6 +84,39 @@ export const fileSystemSuite = suite('file system provider', (test) => {
       'a save nobody confirmed'
     );
     equal(readFileSync(onDisk('write-me.txt'), 'utf8'), 'before', 'nothing may have been written');
+  });
+
+  test('a write that must not overwrite refuses an existing file before asking anything', async () => {
+    // Called on the provider directly: the workspace API always passes create and overwrite
+    // both true, so these refusals are reachable only by callers that ask for them.
+    const test_ = await connect();
+    writeFileSync(onDisk('keep-me.txt'), 'original');
+
+    await rejects(
+      () =>
+        test_.fileSystem.writeFile(remoteUri(ALIAS, '/keep-me.txt'), encode('replacement'), {
+          create: true,
+          overwrite: false
+        }),
+      (error) => error instanceof vscode.FileSystemError && error.code === 'FileExists',
+      'a write with overwrite:false onto an existing file'
+    );
+    equal(readFileSync(onDisk('keep-me.txt'), 'utf8'), 'original', 'the file is untouched');
+  });
+
+  test('a write that must not create refuses a missing file', async () => {
+    const test_ = await connect();
+
+    await rejects(
+      () =>
+        test_.fileSystem.writeFile(remoteUri(ALIAS, '/never-made.txt'), encode('content'), {
+          create: false,
+          overwrite: true
+        }),
+      (error) => error instanceof vscode.FileSystemError && error.code === 'FileNotFound',
+      'a write with create:false to a missing file'
+    );
+    equal(existsSync(onDisk('never-made.txt')), false, 'nothing may have been created');
   });
 
   test('a confirmed write reaches the server and leaves no temporary behind', async () => {
